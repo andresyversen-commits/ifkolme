@@ -1005,6 +1005,7 @@ export default function App() {
   const [icsUrl, setIcsUrl] = useState(DEFAULT_MINFOTBOLL_ICS_URL);
   const [syncingIcs, setSyncingIcs] = useState(false);
   const [coachDraft, setCoachDraft] = useState("");
+  const [coachDraftDirty, setCoachDraftDirty] = useState(false);
   const {
     needRefresh: [needRefresh, setNeedRefresh],
     updateServiceWorker,
@@ -1100,8 +1101,9 @@ export default function App() {
   useEffect(() => {
     const list = Array.isArray(state?.coachNames) ? state.coachNames : [];
     if (!list.length) return;
+    if (coachDraftDirty) return;
     setCoachDraft(list.join(", "));
-  }, [state?.coachNames]);
+  }, [state?.coachNames, coachDraftDirty]);
 
   useEffect(() => {
     if (!okMsg) return;
@@ -1338,6 +1340,7 @@ export default function App() {
         body: { coachNames: names },
       });
       setState(next);
+      setCoachDraftDirty(false);
       setOkMsg("Tränarnamn uppdaterade.");
     } catch (e) {
       setErr(e.message);
@@ -2110,7 +2113,7 @@ export default function App() {
                     Ladda upp logo
                     <input
                       type="file"
-                      accept="image/png,image/jpeg,image/webp,image/gif"
+                      accept="image/png,image/jpeg,image/webp,image/gif,image/svg+xml"
                       style={{ display: "none" }}
                       onChange={(e) => {
                         const file = e.target.files?.[0];
@@ -2144,7 +2147,10 @@ export default function App() {
                 className="field__input"
                 type="text"
                 value={coachDraft}
-                onChange={(e) => setCoachDraft(e.target.value)}
+                onChange={(e) => {
+                  setCoachDraft(e.target.value);
+                  setCoachDraftDirty(true);
+                }}
                 placeholder="Jonas, Per, Anders, Kim"
               />
             </div>

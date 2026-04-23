@@ -648,8 +648,8 @@ app.put("/api/team-logos", (req, res) => {
     return res.json(jsonState(state));
   }
   const value = String(logoDataUrl || "").trim();
-  if (!/^data:image\/(png|jpeg|jpg|webp|gif);base64,/i.test(value)) {
-    return res.status(400).json({ error: "Ogiltig bild. Ladda upp PNG/JPG/WebP/GIF." });
+  if (!/^data:image\/(png|jpeg|jpg|webp|gif|svg\+xml);base64,/i.test(value)) {
+    return res.status(400).json({ error: "Ogiltig bild. Ladda upp PNG/JPG/WebP/GIF/SVG." });
   }
   state.teamLogos[team] = value;
   writeState(state);
