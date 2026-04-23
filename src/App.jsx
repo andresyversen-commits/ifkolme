@@ -109,8 +109,18 @@ function daysInMonth(year, monthIndex) {
   return new Date(year, monthIndex + 1, 0).getDate();
 }
 
+function monthKeyOf(dateObj) {
+  return `${dateObj.getFullYear()}-${String(dateObj.getMonth() + 1).padStart(2, "0")}`;
+}
+
+function parseMonthKey(key) {
+  const [y, m] = String(key || "").split("-").map(Number);
+  if (!y || !m) return null;
+  return { year: y, month: m - 1 };
+}
+
 /** Truppvisning: samma namn-/år-typografi som översikten, sorterat 2015 först. */
-function MatchLineupNames({ playerIds, players }) {
+function MatchLineupNames({ playerIds, players, canToggleAvailability = false, onToggleAvailability }) {
   const rows = useMemo(() => {
     return [...playerIds]
       .map((id) => players.find((p) => p.id === id))
@@ -126,8 +136,20 @@ function MatchLineupNames({ playerIds, players }) {
     <ul className="lineup-list" aria-label="Trupp">
       {rows.map((p) => (
         <li key={p.id} className="lineup-list__row">
-          <span className="lineup-list__name">{p.name}</span>
+          <span className="lineup-list__name">
+            {p.name}
+            {p.available === false ? <span className="lineup-list__status">Ej tillgänglig</span> : null}
+          </span>
           <span className="lineup-list__year">{p.birthYear}</span>
+          {canToggleAvailability ? (
+            <button
+              type="button"
+              className={`btn btn--sm ${p.available === false ? "btn--secondary" : "btn--plain"} lineup-list__availability-btn`}
+              onClick={() => onToggleAvailability?.(p)}
+            >
+              {p.available === false ? "Markera tillgänglig" : "Markera otillgänglig"}
+            </button>
+          ) : null}
         </li>
       ))}
     </ul>
@@ -620,7 +642,14 @@ function MatchCard({
                 </span>
               )}
             </p>
-            <MatchLineupNames playerIds={m.selectedPlayerIds} players={state.players} />
+            <MatchLineupNames
+              playerIds={m.selectedPlayerIds}
+              players={state.players}
+              canToggleAvailability={m.status !== "played"}
+              onToggleAvailability={(p) => {
+                togglePlayerAvailability(p).catch(() => null);
+              }}
+            />
           </>
         ) : (
           <p className="text-muted">Inget uttag</p>
@@ -680,36 +709,6 @@ function MatchCard({
           )}
         </div>
       </div>
-
-      {m.status !== "played" && (
-        <div className="match-availability" aria-label="Snabb frånvaro">
-          <h4 className="panel__title" style={{ fontSize: 15, margin: "0 0 8px" }}>
-            Snabb frånvaro
-          </h4>
-          <p className="text-muted" style={{ margin: "0 0 8px" }}>
-            Markera spelare som ej tillgänglig direkt här, utan att gå till spelarlistan.
-          </p>
-          <div className="match-availability__grid">
-            {[...(state.players || [])]
-              .sort((a, b) => {
-                if (a.birthYear !== b.birthYear) return a.birthYear - b.birthYear;
-                return a.name.localeCompare(b.name, "sv");
-              })
-              .map((p) => (
-                <button
-                  key={p.id}
-                  type="button"
-                  className={`match-availability__chip${p.available === false ? " match-availability__chip--off" : ""}`}
-                  onClick={() => {
-                    togglePlayerAvailability(p).catch(() => null);
-                  }}
-                >
-                  {p.name} ({p.birthYear}) {p.available === false ? "· Ej tillgänglig" : "· Tillgänglig"}
-                </button>
-              ))}
-          </div>
-        </div>
-      )}
 
       {m.status !== "played" && isP11Series && (
         <div style={{ marginBottom: 12 }}>
@@ -1083,41 +1082,68 @@ export default function App() {
     const arr = (state?.matches || []).filter((m) => m.branch === "p11");
     return [...arr].sort(compareMatchesChronologically);
   }, [state?.matches]);
-  const matchesCalendar = useMemo(() => matchesP10.slice(0, 13), [matchesP10]);
-  const calendarMonths = useMemo(() => {
-    const monthMap = new Map();
+  const matchesCalendar = useMemo(() => {
+    const arr = (state?.matches || []).filter((m) => parseIsoDateLocal(m.fixture?.date));
+    return [...arr].sort(compareMatchesChronologically);
+  }, [state?.matches]);
+  const calendarMonthKeys = useMemo(() => {
+    const keys = new Set();
+    const now = new Date();
+    const currentMonthDate = new Date(now.getFullYear(), now.getMonth(), 1);
+    keys.add(monthKeyOf(currentMonthDate));
     for (const m of matchesCalendar) {
       const dt = parseIsoDateLocal(m.fixture?.date);
       if (!dt) continue;
-      const y = dt.getFullYear();
-      const mo = dt.getMonth();
-      const day = dt.getDate();
-      const key = `${y}-${String(mo + 1).padStart(2, "0")}`;
-      if (!monthMap.has(key)) {
-        monthMap.set(key, {
-          key,
-          year: y,
-          month: mo,
-          matchesByDay: new Map(),
-        });
-      }
-      const entry = monthMap.get(key);
-      if (!entry.matchesByDay.has(day)) entry.matchesByDay.set(day, []);
-      entry.matchesByDay.get(day).push(m);
+      keys.add(monthKeyOf(new Date(dt.getFullYear(), dt.getMonth(), 1)));
     }
-    return [...monthMap.values()]
-      .sort((a, b) => (a.year !== b.year ? a.year - b.year : a.month - b.month))
-      .map((entry) => {
-        const totalDays = daysInMonth(entry.year, entry.month);
-        const first = new Date(entry.year, entry.month, 1);
-        const lead = (first.getDay() + 6) % 7; // Måndag = 0
-        const cells = [];
-        for (let i = 0; i < lead; i++) cells.push(null);
-        for (let d = 1; d <= totalDays; d++) cells.push(d);
-        while (cells.length % 7 !== 0) cells.push(null);
-        return { ...entry, cells };
-      });
+    return [...keys].sort();
   }, [matchesCalendar]);
+  const [calendarMonthKey, setCalendarMonthKey] = useState(() => {
+    const now = new Date();
+    return monthKeyOf(new Date(now.getFullYear(), now.getMonth(), 1));
+  });
+  useEffect(() => {
+    if (!calendarMonthKeys.length) return;
+    if (calendarMonthKeys.includes(calendarMonthKey)) return;
+    const now = new Date();
+    const current = monthKeyOf(new Date(now.getFullYear(), now.getMonth(), 1));
+    setCalendarMonthKey(calendarMonthKeys.includes(current) ? current : calendarMonthKeys[0]);
+  }, [calendarMonthKeys, calendarMonthKey]);
+  const visibleCalendarMonth = useMemo(() => {
+    const parsed = parseMonthKey(calendarMonthKey);
+    if (parsed) return parsed;
+    const now = new Date();
+    return { year: now.getFullYear(), month: now.getMonth() };
+  }, [calendarMonthKey]);
+  const calendarMonthView = useMemo(() => {
+    const { year, month } = visibleCalendarMonth;
+    const monthMatches = matchesCalendar.filter((m) => {
+      const dt = parseIsoDateLocal(m.fixture?.date);
+      return dt && dt.getFullYear() === year && dt.getMonth() === month;
+    });
+    const matchesByDay = new Map();
+    for (const m of monthMatches) {
+      const dt = parseIsoDateLocal(m.fixture?.date);
+      if (!dt) continue;
+      const day = dt.getDate();
+      if (!matchesByDay.has(day)) matchesByDay.set(day, []);
+      matchesByDay.get(day).push(m);
+    }
+    const totalDays = daysInMonth(year, month);
+    const first = new Date(year, month, 1);
+    const lead = (first.getDay() + 6) % 7; // Måndag = 0
+    const cells = [];
+    for (let i = 0; i < lead; i++) cells.push(null);
+    for (let d = 1; d <= totalDays; d++) cells.push(d);
+    while (cells.length % 7 !== 0) cells.push(null);
+    return {
+      key: monthKeyOf(new Date(year, month, 1)),
+      year,
+      month,
+      matchesByDay,
+      cells,
+    };
+  }, [matchesCalendar, visibleCalendarMonth]);
   const players2015 = useMemo(
     () => (state?.players ? state.players.filter((p) => p.birthYear === 2015) : []),
     [state?.players]
@@ -1136,8 +1162,16 @@ export default function App() {
   useEffect(() => {
     if (!matchesCalendar.length) return;
     if (activeMatchId && matchesCalendar.some((m) => m.id === activeMatchId)) return;
-    setActiveMatchId(matchesCalendar[0].id);
-  }, [matchesCalendar, activeMatchId]);
+    const firstInVisibleMonth = matchesCalendar.find((m) => {
+      const dt = parseIsoDateLocal(m.fixture?.date);
+      return (
+        dt &&
+        dt.getFullYear() === visibleCalendarMonth.year &&
+        dt.getMonth() === visibleCalendarMonth.month
+      );
+    });
+    setActiveMatchId((firstInVisibleMonth || matchesCalendar[0]).id);
+  }, [matchesCalendar, activeMatchId, visibleCalendarMonth.year, visibleCalendarMonth.month]);
 
   function playerName(id) {
     return state?.players.find((p) => p.id === id)?.name ?? id;
@@ -1147,6 +1181,25 @@ export default function App() {
     if ((m.selectedPlayerIds || []).length) return { label: "Lag valt", cls: "calendar-match__dot--selected" };
     return { label: "Ej vald", cls: "calendar-match__dot--empty" };
   }
+
+  function calendarOpponentName(m) {
+    const home = m.fixture?.homeTeam || "";
+    const away = m.fixture?.awayTeam || "";
+    if (!home && !away) return "Motståndare saknas";
+    if (/ifk\s*ölme/i.test(home) || /ifk\s*olme/i.test(home)) return away || home;
+    if (/ifk\s*ölme/i.test(away) || /ifk\s*olme/i.test(away)) return home || away;
+    return away || home;
+  }
+
+  function calendarTimeLabel(m) {
+    if (!m.fixture?.time || m.fixture.time === "00:00") return "Tid ej satt";
+    return m.fixture.time;
+  }
+
+  const calendarMonthIndex = Math.max(0, calendarMonthKeys.indexOf(calendarMonthView.key));
+  const hasPrevCalendarMonth = calendarMonthIndex > 0;
+  const hasNextCalendarMonth =
+    calendarMonthIndex >= 0 && calendarMonthIndex < calendarMonthKeys.length - 1;
 
   async function installApp() {
     if (deferredInstallPrompt) {
@@ -1628,55 +1681,73 @@ export default function App() {
           <h3 className="panel__title" style={{ fontSize: 17, margin: "0 0 8px" }}>
             Matchkalender
           </h3>
-          {calendarMonths.length === 0 ? (
-            <p className="text-muted">Inga matchdatum att visa i kalendern.</p>
-          ) : (
-            <div className="calendar-month-stack" aria-label="Matchkalender">
-              {calendarMonths.map((month) => (
-                <section key={month.key} className="calendar-month">
-                  <h4 className="calendar-month__title">
-                    {new Date(month.year, month.month, 1).toLocaleDateString("sv-SE", {
-                      month: "long",
-                      year: "numeric",
-                    })}
-                  </h4>
-                  <div className="calendar-month__weekdays" aria-hidden>
-                    {["Mån", "Tis", "Ons", "Tor", "Fre", "Lör", "Sön"].map((w) => (
-                      <span key={w}>{w}</span>
-                    ))}
-                  </div>
-                  <div className="calendar-month__grid">
-                    {month.cells.map((day, i) => {
-                      if (!day) return <div key={`empty-${month.key}-${i}`} className="calendar-day calendar-day--empty" />;
-                      const dayMatches = month.matchesByDay.get(day) || [];
-                      return (
-                        <div key={`${month.key}-${day}`} className="calendar-day">
-                          <span className="calendar-day__date">{day}</span>
-                          <div className="calendar-day__matches">
-                            {dayMatches.map((m) => {
-                              const st = calendarStatus(m);
-                              return (
-                                <button
-                                  key={m.id}
-                                  type="button"
-                                  className={`calendar-pill${activeMatchId === m.id ? " calendar-pill--active" : ""}`}
-                                  onClick={() => setActiveMatchId(m.id)}
-                                  title={`Match ${m.number} · ${st.label} · Grupp ${m.intendedGroup2015 || "—"} · ${(m.selectedPlayerIds || []).length} spelare`}
-                                >
-                                  <span className={`calendar-match__dot ${st.cls}`} aria-hidden />
-                                  M{m.number}
-                                </button>
-                              );
-                            })}
-                          </div>
-                        </div>
-                      );
-                    })}
-                  </div>
-                </section>
-              ))}
+          <div className="calendar-month-stack" aria-label="Matchkalender">
+            <div className="calendar-nav">
+              <button
+                type="button"
+                className="btn btn--secondary btn--sm"
+                onClick={() => hasPrevCalendarMonth && setCalendarMonthKey(calendarMonthKeys[calendarMonthIndex - 1])}
+                disabled={!hasPrevCalendarMonth}
+              >
+                ← Föregående
+              </button>
+              <h4 className="calendar-month__title" style={{ margin: 0 }}>
+                {new Date(calendarMonthView.year, calendarMonthView.month, 1).toLocaleDateString("sv-SE", {
+                  month: "long",
+                  year: "numeric",
+                })}
+              </h4>
+              <button
+                type="button"
+                className="btn btn--secondary btn--sm"
+                onClick={() => hasNextCalendarMonth && setCalendarMonthKey(calendarMonthKeys[calendarMonthIndex + 1])}
+                disabled={!hasNextCalendarMonth}
+              >
+                Nästa →
+              </button>
             </div>
-          )}
+            <section className="calendar-month">
+              <div className="calendar-month__weekdays" aria-hidden>
+                {["Mån", "Tis", "Ons", "Tor", "Fre", "Lör", "Sön"].map((w) => (
+                  <span key={w}>{w}</span>
+                ))}
+              </div>
+              <div className="calendar-month__grid">
+                {calendarMonthView.cells.map((day, i) => {
+                  if (!day) return <div key={`empty-${calendarMonthView.key}-${i}`} className="calendar-day calendar-day--empty" />;
+                  const dayMatches = calendarMonthView.matchesByDay.get(day) || [];
+                  return (
+                    <div key={`${calendarMonthView.key}-${day}`} className="calendar-day">
+                      <span className="calendar-day__date">{day}</span>
+                      <div className="calendar-day__matches">
+                        {dayMatches.map((m) => {
+                          const st = calendarStatus(m);
+                          const branchLabel = (m.branch || "p10") === "p11" ? "P11" : "P10";
+                          return (
+                            <button
+                              key={m.id}
+                              type="button"
+                              className={`calendar-event${activeMatchId === m.id ? " calendar-event--active" : ""}`}
+                              onClick={() => setActiveMatchId(m.id)}
+                              title={`Match ${m.number} · ${branchLabel} · ${calendarOpponentName(m)} · ${calendarTimeLabel(m)} · ${st.label}`}
+                            >
+                              <div className="calendar-event__top">
+                                <span className={`calendar-match__dot ${st.cls}`} aria-hidden />
+                                <strong>{branchLabel}</strong>
+                                <span className="calendar-event__match-no">Match {m.number}</span>
+                              </div>
+                              <div className="calendar-event__opponent">{calendarOpponentName(m)}</div>
+                              <div className="calendar-event__time">{calendarTimeLabel(m)}</div>
+                            </button>
+                          );
+                        })}
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            </section>
+          </div>
 
           {matchesCalendar.find((m) => m.id === activeMatchId) ? (
             <div className="section-spacer" style={{ marginTop: 14 }}>
@@ -1702,7 +1773,7 @@ export default function App() {
 
       {tab === "overview" && (
         <section className="panel" role="tabpanel" id="panel-overview" aria-labelledby="tab-overview">
-          <h2 className="panel__title">Översikt</h2>
+          <h2 className="panel__title">Statistik</h2>
           <p className="panel__lead">
             Sortering: minst genomförda matcher först. Ålder: {seasonYear()} minus födelseår.
           </p>
