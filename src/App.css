@@ -169,6 +169,19 @@ body {
   max-width: 100%;
 }
 
+.segmented--match-tabs {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+  gap: 6px;
+  width: 100%;
+}
+
+.segmented--match-tabs .segmented__btn {
+  width: 100%;
+  justify-content: flex-start;
+  text-align: left;
+}
+
 /* Panel */
 .panel {
   margin-bottom: 8px;
@@ -270,6 +283,7 @@ body {
 .match-card__inner {
   padding: 16px 18px 18px;
   min-width: 0;
+  width: 100%;
 }
 
 .match-card__head {
@@ -997,10 +1011,21 @@ body {
   width: 100%;
 }
 
+.match-card__headrow > * {
+  min-width: 0;
+  max-width: 100%;
+}
+
 .lineup-formation-grid {
   display: grid;
   grid-template-columns: repeat(3, minmax(0, 1fr));
   gap: 8px;
+  width: 100%;
+}
+
+.lineup-formation-grid > * {
+  min-width: 0;
+  max-width: 100%;
 }
 
 /* Laddning / tomt */
@@ -1177,6 +1202,9 @@ body {
 
 .lineup-pitch {
   margin-top: 14px;
+  width: 100%;
+  max-width: 100%;
+  overflow: hidden;
 }
 
 .lineup-dnd-help {
@@ -1601,6 +1629,7 @@ body {
 .match-comments__form {
   display: grid;
   gap: 8px;
+  width: 100%;
 }
 
 .match-comments__list {
@@ -1618,6 +1647,13 @@ body {
   padding: 8px 10px;
   background: color-mix(in oklab, white 88%, var(--bg-elevated));
   overflow-wrap: anywhere;
+}
+
+.match-card textarea,
+.match-card input,
+.match-card select,
+.match-card button {
+  max-width: 100%;
 }
 
 .match-availability {
@@ -1827,6 +1863,10 @@ body {
     min-width: 0;
   }
 
+  .segmented--match-tabs .segmented__btn {
+    padding: 10px 12px;
+  }
+
   .btn {
     min-height: 46px;
     font-size: 16px;
@@ -1915,6 +1955,7 @@ body {
   }
 
   .lineup-formation-grid {
+    grid-template-columns: 1fr;
     gap: 6px;
   }
 
@@ -1953,8 +1994,8 @@ body {
     font-size: 20px;
   }
 
-  .lineup-formation-grid {
-    grid-template-columns: 1fr;
+  .segmented--match-tabs .segmented__btn {
+    font-size: 13px;
   }
 
   .calendar-event__top {

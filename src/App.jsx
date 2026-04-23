@@ -772,7 +772,7 @@ function MatchCard({
         </p>
       )}
 
-      <div className="segmented segmented--nested" role="tablist" aria-label="Matchdetaljer">
+      <div className="segmented segmented--nested segmented--match-tabs" role="tablist" aria-label="Matchdetaljer">
         <button
           type="button"
           role="tab"
