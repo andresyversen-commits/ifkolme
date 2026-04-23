@@ -210,13 +210,15 @@ function assignmentFromGroups(groups2015, players2015) {
   return m;
 }
 
-function Groups2015Editor({ groups2015, players2015, load, setErr }) {
+function Groups2015Editor({ groups2015, players2015, load, setErr, revision }) {
   const [assign, setAssign] = useState({});
+  const [dirty, setDirty] = useState(false);
 
   useEffect(() => {
     if (!groups2015 || !players2015.length) return;
+    if (dirty) return;
     setAssign(assignmentFromGroups(groups2015, players2015));
-  }, [groups2015, players2015]);
+  }, [groups2015, players2015, dirty, revision]);
 
   const sorted2015 = useMemo(() => {
     return [...players2015].sort((a, b) => {
@@ -278,7 +280,10 @@ function Groups2015Editor({ groups2015, players2015, load, setErr }) {
                     className="field__select"
                     style={{ maxWidth: "100%" }}
                     value={assign[p.id] || "A"}
-                    onChange={(e) => setAssign((prev) => ({ ...prev, [p.id]: e.target.value }))}
+                    onChange={(e) => {
+                      setDirty(true);
+                      setAssign((prev) => ({ ...prev, [p.id]: e.target.value }));
+                    }}
                   >
                     <option value="A">A</option>
                     <option value="B">B</option>
@@ -312,6 +317,7 @@ function Groups2015Editor({ groups2015, players2015, load, setErr }) {
           setErr("");
           try {
             await api("/api/groups2015", { method: "PUT", body: { A, B, C } });
+            setDirty(false);
             await load();
           } catch (x) {
             setErr(x.message);
@@ -324,13 +330,15 @@ function Groups2015Editor({ groups2015, players2015, load, setErr }) {
   );
 }
 
-function Groups2016Editor({ groups2016, groups2016Extra, players2016, load, setErr }) {
+function Groups2016Editor({ groups2016, groups2016Extra, players2016, load, setErr, revision }) {
   const [assign, setAssign] = useState({});
+  const [dirty, setDirty] = useState(false);
 
   useEffect(() => {
     if (!groups2016 || !players2016.length) return;
+    if (dirty) return;
     setAssign(assignmentFromGroups2016(groups2016, groups2016Extra, players2016));
-  }, [groups2016, groups2016Extra, players2016]);
+  }, [groups2016, groups2016Extra, players2016, dirty, revision]);
 
   const sorted2016 = useMemo(() => {
     return [...players2016].sort((a, b) => {
@@ -376,7 +384,10 @@ function Groups2016Editor({ groups2016, groups2016Extra, players2016, load, setE
                     className="field__select"
                     style={{ maxWidth: "100%" }}
                     value={assign[p.id] || "A"}
-                    onChange={(e) => setAssign((prev) => ({ ...prev, [p.id]: e.target.value }))}
+                    onChange={(e) => {
+                      setDirty(true);
+                      setAssign((prev) => ({ ...prev, [p.id]: e.target.value }));
+                    }}
                   >
                     <option value="A">A</option>
                     <option value="B">B</option>
@@ -413,6 +424,7 @@ function Groups2016Editor({ groups2016, groups2016Extra, players2016, load, setE
           setErr("");
           try {
             await api("/api/groups2016", { method: "PUT", body: { A, B, C, extra } });
+            setDirty(false);
             await load();
           } catch (x) {
             setErr(x.message);
@@ -1489,6 +1501,7 @@ export default function App() {
                 players2015={players2015}
                 load={load}
                 setErr={setErr}
+                revision={state?.meta?.revision}
               />
               <h4 className="panel__title" style={{ fontSize: 16, margin: "24px 0 8px" }}>
                 Födda 2016
@@ -1499,6 +1512,7 @@ export default function App() {
                 players2016={players2016}
                 load={load}
                 setErr={setErr}
+                revision={state?.meta?.revision}
               />
             </div>
           )}
