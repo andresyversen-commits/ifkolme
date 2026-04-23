@@ -953,9 +953,6 @@ function MatchCard({
                   ))}
                 </div>
                 {!startersUnique ? <p className="text-muted">En position kan bara ha en spelare. Välj unika positioner.</p> : null}
-                {benchPlayers.length > 0 ? (
-                  <p className="text-muted">Bänk: {benchPlayers.map((p) => p.name).join(", ")}</p>
-                ) : null}
                 <div className="btn-row" style={{ marginTop: 6 }}>
                   <button
                     type="button"
@@ -1030,6 +1027,11 @@ function MatchCard({
                     Formation {formationDraft.defenders}-{formationDraft.midfielders}-{formationDraft.attackers}
                   </p>
                 </div>
+                {benchPlayers.length > 0 ? (
+                  <p className="text-muted lineup-bench-under-pitch">
+                    Bänk: {benchPlayers.map((p) => p.name).join(", ")}
+                  </p>
+                ) : null}
               </div>
             </div>
           )}
@@ -1691,7 +1693,20 @@ export default function App() {
   const matchGroupsValid =
     rotationView?.groupsValid !== false && rotationView?.groups2016Valid !== false;
 
-  const [simulation, setSimulation] = useState(null);
+  const [seasonSimulation, setSeasonSimulation] = useState(null);
+  const [seasonSimBusy, setSeasonSimBusy] = useState(false);
+  const runSeasonSimulation = useCallback(async () => {
+    setErr("");
+    setSeasonSimBusy(true);
+    try {
+      const data = await api("/api/simulate-season");
+      setSeasonSimulation(data);
+    } catch (e) {
+      setErr(e.message);
+    } finally {
+      setSeasonSimBusy(false);
+    }
+  }, []);
   const coachNames = useMemo(() => {
     if (Array.isArray(state?.coaches) && state.coaches.length) {
       return state.coaches.map((c) => c.name).filter(Boolean);
@@ -2726,6 +2741,62 @@ export default function App() {
               ))}
             </div>
           )}
+
+          <div className="group" style={{ padding: 12, marginTop: 20 }}>
+            <p className="panel__lead" style={{ margin: "0 0 6px" }}>
+              Säsongssimulering
+            </p>
+            <p className="text-muted" style={{ margin: "0 0 10px", fontSize: 14 }}>
+              Kör urvalsreglerna för alla matcher i datumordning (fast frö). Sparad data och riktiga matcher ändras inte.
+            </p>
+            <button
+              type="button"
+              className="btn btn--secondary"
+              disabled={seasonSimBusy}
+              onClick={() => runSeasonSimulation().catch(() => null)}
+            >
+              {seasonSimBusy ? "Kör simulering…" : "Simulera hela säsongen"}
+            </button>
+            {seasonSimulation ? (
+              <>
+                <ul className="season-sim-messages">
+                  {(seasonSimulation.validation?.messages || []).map((msg, i) => (
+                    <li key={i}>{msg}</li>
+                  ))}
+                </ul>
+                <details className="season-sim-details">
+                  <summary>Matcher i simuleringen</summary>
+                  <ol>
+                    {(seasonSimulation.steps || []).map((s, i) => (
+                      <li key={i}>
+                        Match {s.match}: 2015-grupp {s.group ?? "—"}, 2016-grupp {s.group2016 ?? "—"}
+                      </li>
+                    ))}
+                  </ol>
+                </details>
+                <div className="stat-list" style={{ marginTop: 12 }}>
+                  <div className="stat-head" aria-hidden>
+                    <span>Namn</span>
+                    <span>År</span>
+                    <span>Matcher (sim)</span>
+                  </div>
+                  {[...(seasonSimulation.perPlayer || [])]
+                    .sort(
+                      (a, b) =>
+                        (Number(b.matchesPlayed) || 0) - (Number(a.matchesPlayed) || 0) ||
+                        String(a.name).localeCompare(String(b.name), "sv"),
+                    )
+                    .map((p) => (
+                      <div key={p.id} className="stat-row">
+                        <p className="stat-row__name">{p.name}</p>
+                        <span className="stat-row__year">{p.birthYear}</span>
+                        <span className="stat-row__value">{p.matchesPlayed}</span>
+                      </div>
+                    ))}
+                </div>
+              </>
+            ) : null}
+          </div>
 
           <div className="section-spacer" style={{ marginTop: 20 }}>
             <div className="btn-row" style={{ marginBottom: 10 }}>

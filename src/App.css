@@ -1076,6 +1076,42 @@ body {
   max-width: 100%;
 }
 
+.lineup-bench-under-pitch {
+  margin-top: 10px;
+  font-size: 13px;
+  line-height: 1.4;
+  width: 100%;
+}
+
+.season-sim-messages {
+  margin: 12px 0 0;
+  padding-left: 1.25rem;
+  font-size: 14px;
+  line-height: 1.45;
+  color: var(--text-secondary);
+}
+
+.season-sim-details {
+  margin-top: 12px;
+  font-size: 14px;
+}
+
+.season-sim-details summary {
+  cursor: pointer;
+  font-weight: 600;
+  color: var(--text);
+}
+
+.season-sim-details ol {
+  margin: 8px 0 0;
+  padding-left: 1.25rem;
+  font-size: 13px;
+  line-height: 1.45;
+  color: var(--text-secondary);
+  max-height: 220px;
+  overflow-y: auto;
+}
+
 .lineup-formation-wrap {
   display: grid;
   grid-template-columns: 1fr;
