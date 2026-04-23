@@ -200,6 +200,15 @@ function expectedAvailableIdsByYear(state, year) {
     .sort();
 }
 
+function normalizeTeamKey(name) {
+  return String(name || "")
+    .normalize("NFKD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, "-")
+    .replace(/^-+|-+$/g, "");
+}
+
 function sameSortedIdSets(a, b) {
   const sa = [...a].sort();
   const sb = [...b].sort();
@@ -429,6 +438,18 @@ function migrateStateShape(data) {
   if (!data.teamLogos || typeof data.teamLogos !== "object" || Array.isArray(data.teamLogos)) {
     data.teamLogos = {};
     dirty = true;
+  } else {
+    const normalized = {};
+    for (const [k, v] of Object.entries(data.teamLogos)) {
+      if (typeof v !== "string" || !v.trim()) continue;
+      const nk = normalizeTeamKey(k);
+      if (!nk) continue;
+      if (!normalized[nk]) normalized[nk] = v;
+    }
+    const prevKeys = Object.keys(data.teamLogos).sort().join("|");
+    const nextKeys = Object.keys(normalized).sort().join("|");
+    if (prevKeys !== nextKeys) dirty = true;
+    data.teamLogos = normalized;
   }
   if (!data.groups2016 || typeof data.groups2016 !== "object") {
     const built = buildGroups2016FromPlayers(data.players || []);
@@ -639,19 +660,21 @@ app.put("/api/settings/coaches", (req, res) => {
 app.put("/api/team-logos", (req, res) => {
   const state = readState();
   const team = String(req.body?.team || "").trim();
+  const teamKey = normalizeTeamKey(team);
   const logoDataUrl = req.body?.logoDataUrl;
-  if (!team) return res.status(400).json({ error: "Lag saknas." });
+  if (!teamKey) return res.status(400).json({ error: "Lag saknas." });
   if (!state.teamLogos || typeof state.teamLogos !== "object") state.teamLogos = {};
   if (logoDataUrl === null) {
     delete state.teamLogos[team];
+    delete state.teamLogos[teamKey];
     writeState(state);
     return res.json(jsonState(state));
   }
   const value = String(logoDataUrl || "").trim();
-  if (!/^data:image\/(png|jpeg|jpg|webp|gif|svg\+xml);base64,/i.test(value)) {
+  if (!/^data:image\/(png|jpeg|jpg|webp|gif|svg\+xml)(;[^,]*)?,/i.test(value)) {
     return res.status(400).json({ error: "Ogiltig bild. Ladda upp PNG/JPG/WebP/GIF/SVG." });
   }
-  state.teamLogos[team] = value;
+  state.teamLogos[teamKey] = value;
   writeState(state);
   res.json(jsonState(state));
 });

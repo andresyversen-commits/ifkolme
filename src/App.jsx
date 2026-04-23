@@ -112,6 +112,15 @@ function daysInMonth(year, monthIndex) {
   return new Date(year, monthIndex + 1, 0).getDate();
 }
 
+function normalizeTeamKey(name) {
+  return String(name || "")
+    .normalize("NFKD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, "-")
+    .replace(/^-+|-+$/g, "");
+}
+
 function monthKeyOf(dateObj) {
   return `${dateObj.getFullYear()}-${String(dateObj.getMonth() + 1).padStart(2, "0")}`;
 }
@@ -1232,6 +1241,16 @@ export default function App() {
     }
     return [...set].sort((a, b) => a.localeCompare(b, "sv"));
   }, [state?.matches]);
+  const getStoredTeamLogo = useCallback(
+    (teamName) => {
+      if (!teamName) return "";
+      const direct = state?.teamLogos?.[teamName];
+      if (direct) return direct;
+      const norm = normalizeTeamKey(teamName);
+      return state?.teamLogos?.[norm] || "";
+    },
+    [state?.teamLogos],
+  );
 
   useEffect(() => {
     if (!matchesCalendar.length) return;
@@ -1273,8 +1292,8 @@ export default function App() {
   function calendarOpponentLogo(m) {
     const home = m.fixture?.home || m.fixture?.homeTeam || "";
     const away = m.fixture?.away || m.fixture?.awayTeam || "";
-    const homeLogo = m.fixture?.homeLogo || state?.teamLogos?.[home];
-    const awayLogo = m.fixture?.awayLogo || state?.teamLogos?.[away];
+    const homeLogo = m.fixture?.homeLogo || getStoredTeamLogo(home);
+    const awayLogo = m.fixture?.awayLogo || getStoredTeamLogo(away);
     if (/ifk\s*ölme/i.test(home) || /ifk\s*olme/i.test(home)) return { name: away, logoUrl: awayLogo };
     if (/ifk\s*ölme/i.test(away) || /ifk\s*olme/i.test(away)) return { name: home, logoUrl: homeLogo };
     return { name: away || home, logoUrl: awayLogo || homeLogo };
@@ -2106,7 +2125,7 @@ export default function App() {
               {teamNames.map((team) => (
                 <div key={team} className="logo-manager__row">
                   <div className="logo-manager__name">
-                    <FixtureCrest name={team} logoUrl={state?.teamLogos?.[team]} />
+                    <FixtureCrest name={team} logoUrl={getStoredTeamLogo(team)} />
                     <span>{team}</span>
                   </div>
                   <label className="btn btn--secondary btn--sm">
