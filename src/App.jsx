@@ -90,6 +90,15 @@ function buildOutfieldSlots(formation) {
   return out;
 }
 
+function slotLabelFromKey(slotKey, outfieldSlots) {
+  if (slotKey === "bench") return "Bänk";
+  if (slotKey === "gk") return "Målvakt";
+  const slot = outfieldSlots.find((s) => s.key === slotKey);
+  if (!slot) return "Bänk";
+  const lane = slot.lane === "vänster" ? "vänster" : slot.lane === "höger" ? "höger" : "central";
+  return `${roleLabelSv(slot.role)} (${lane})`;
+}
+
 function seasonYear() {
   return new Date().getFullYear();
 }
@@ -567,20 +576,7 @@ function MatchCard({
   }));
   const sideDraft = "vänster";
   const [matchSubTab, setMatchSubTab] = useState("squad");
-  const [keeperId, setKeeperId] = useState(() =>
-    m.lineup?.starters?.find((s) => s.role === "goalkeeper")?.playerId ? String(m.lineup.starters.find((s) => s.role === "goalkeeper").playerId) : "",
-  );
-  const [starterMap, setStarterMap] = useState({});
-  const [subsDraft, setSubsDraft] = useState(() =>
-    Array.isArray(m.lineup?.substitutions) && m.lineup.substitutions.length
-      ? m.lineup.substitutions.map((s, i) => ({
-          order: Number(s.order || i + 1),
-          outPlayerId: String(s.outPlayerId || ""),
-          inPlayerId: String(s.inPlayerId || ""),
-          note: String(s.note || ""),
-        }))
-      : [{ order: 1, outPlayerId: "", inPlayerId: "", note: "" }],
-  );
+  const [positionDraftByPlayer, setPositionDraftByPlayer] = useState({});
 
   useEffect(() => {
     setAssistDraft(String(m.fixture?.p11Assist2016 ?? 0));
@@ -595,26 +591,22 @@ function MatchCard({
       attackers: Number(m.lineup?.formation?.attackers || 2),
     };
     setFormationDraft(formation);
-    const gk = m.lineup?.starters?.find((s) => s.role === "goalkeeper");
-    setKeeperId(gk?.playerId ? String(gk.playerId) : "");
-    const slotMap = {};
     const slots = buildOutfieldSlots(formation);
-    for (const slot of slots) {
-      const row = (m.lineup?.starters || []).find((s) => s.role === slot.role && Number(s.order) === slot.order);
-      slotMap[slot.key] = row?.playerId ? String(row.playerId) : "";
+    const next = {};
+    for (const p of (m.selectedPlayerIds || []).map((id) => state.players.find((x) => x.id === id)).filter(Boolean)) {
+      next[p.id] = "bench";
     }
-    setStarterMap(slotMap);
-    setSubsDraft(
-      Array.isArray(m.lineup?.substitutions) && m.lineup.substitutions.length
-        ? m.lineup.substitutions.map((s, i) => ({
-            order: Number(s.order || i + 1),
-            outPlayerId: String(s.outPlayerId || ""),
-            inPlayerId: String(s.inPlayerId || ""),
-            note: String(s.note || ""),
-          }))
-        : [{ order: 1, outPlayerId: "", inPlayerId: "", note: "" }],
-    );
-  }, [m.id, m.lineup]);
+    for (const row of m.lineup?.starters || []) {
+      if (!row?.playerId) continue;
+      if (row.role === "goalkeeper") {
+        next[row.playerId] = "gk";
+        continue;
+      }
+      const slot = slots.find((s) => s.role === row.role && Number(s.order) === Number(row.order));
+      if (slot) next[row.playerId] = slot.key;
+    }
+    setPositionDraftByPlayer(next);
+  }, [m.id, m.lineup, m.selectedPlayerIds, state.players]);
   useEffect(() => {
     setMatchSubTab("squad");
   }, [m.id]);
@@ -655,55 +647,26 @@ function MatchCard({
     });
   const outfieldSlots = useMemo(() => buildOutfieldSlots(formationDraft), [formationDraft]);
   const formationTotal = Number(formationDraft.defenders || 0) + Number(formationDraft.midfielders || 0) + Number(formationDraft.attackers || 0);
-  const starterIds = [keeperId, ...outfieldSlots.map((slot) => starterMap[slot.key] || "")].filter(Boolean);
+  const slotToPlayer = useMemo(() => {
+    const map = {};
+    for (const [playerId, slotKey] of Object.entries(positionDraftByPlayer || {})) {
+      if (!slotKey || slotKey === "bench") continue;
+      if (!map[slotKey]) map[slotKey] = playerId;
+    }
+    return map;
+  }, [positionDraftByPlayer]);
+  const starterIds = Object.values(slotToPlayer).filter(Boolean);
   const startersUnique = new Set(starterIds).size === starterIds.length;
-  const startersReady = Boolean(keeperId) && outfieldSlots.every((slot) => Boolean(starterMap[slot.key])) && startersUnique;
+  const startersReady = Boolean(slotToPlayer.gk) && outfieldSlots.every((slot) => Boolean(slotToPlayer[slot.key])) && startersUnique;
   const selectedById = useMemo(() => {
     const map = new Map();
     for (const p of selectedRows) map.set(p.id, p);
     return map;
   }, [selectedRows]);
-  const benchPlayers = useMemo(() => {
-    const starterSet = new Set(starterIds);
-    return selectedRows.filter((p) => !starterSet.has(p.id));
-  }, [selectedRows, starterIds]);
-
-  const readPlayerFromDrag = (event) => {
-    const fromData = event.dataTransfer?.getData("text/player-id");
-    return String(fromData || "").trim();
-  };
-  const readSlotFromDrag = (event) => {
-    const fromData = event.dataTransfer?.getData("text/slot-key");
-    return String(fromData || "").trim();
-  };
-  const slotPlayerId = (slotKey) => {
-    if (slotKey === "gk") return keeperId || "";
-    return starterMap[slotKey] || "";
-  };
-  const assignSlotPlayer = (slotKey, playerId) => {
-    if (slotKey === "gk") {
-      setKeeperId(playerId || "");
-      return;
-    }
-    setStarterMap((prev) => ({ ...prev, [slotKey]: playerId || "" }));
-  };
-  const handleDropOnSlot = (event, slotKey) => {
-    event.preventDefault();
-    const playerId = readPlayerFromDrag(event);
-    if (!playerId) return;
-    const fromSlot = readSlotFromDrag(event);
-    if (fromSlot && fromSlot !== slotKey) {
-      const targetCurrent = slotPlayerId(slotKey);
-      assignSlotPlayer(fromSlot, targetCurrent);
-    }
-    assignSlotPlayer(slotKey, playerId);
-  };
-  const handleDropToBench = (event) => {
-    event.preventDefault();
-    const fromSlot = readSlotFromDrag(event);
-    if (!fromSlot) return;
-    assignSlotPlayer(fromSlot, "");
-  };
+  const benchPlayers = useMemo(
+    () => selectedRows.filter((p) => (positionDraftByPlayer[p.id] || "bench") === "bench"),
+    [selectedRows, positionDraftByPlayer],
+  );
 
   const names2015 = selectedRows.filter((p) => p.birthYear === 2015).map((p) => p.name);
   const names2016 = selectedRows.filter((p) => p.birthYear === 2016).map((p) => p.name);
@@ -735,15 +698,6 @@ function MatchCard({
       const starters = [...(m.lineup.starters || [])].sort((a, b) => Number(a.order || 0) - Number(b.order || 0));
       for (const s of starters) {
         lines.push(`- ${roleLabelSv(s.role)} ${s.lane || "central"}: ${playerName(s.playerId)}`);
-      }
-      if (Array.isArray(m.lineup.substitutions) && m.lineup.substitutions.length) {
-        lines.push("");
-        lines.push("Byten:");
-        for (const sub of [...m.lineup.substitutions].sort((a, b) => Number(a.order || 0) - Number(b.order || 0))) {
-          lines.push(
-            `- ${sub.order}. ${playerName(sub.outPlayerId)} -> ${playerName(sub.inPlayerId)}${sub.note ? ` (${sub.note})` : ""}`,
-          );
-        }
       }
     }
     await navigator.clipboard.writeText(lines.join("\n"));
@@ -915,110 +869,74 @@ function MatchCard({
             <p className="text-muted">Summan av försvar + mittfält + anfall måste vara 6.</p>
           ) : (
             <>
-              <div className="lineup-dnd-help">Dra spelare från bänken till positionerna på planen. Dra tillbaka till bänken för att ta bort.</div>
-              <div
-                className="lineup-bench"
-                onDragOver={(e) => e.preventDefault()}
-                onDrop={handleDropToBench}
-                aria-label="Bänk"
-              >
-                <strong className="lineup-bench__title">Bänk</strong>
-                <div className="lineup-bench__players">
-                  {benchPlayers.length === 0 ? (
-                    <span className="text-muted">Ingen på bänken.</span>
-                  ) : (
-                    benchPlayers.map((p) => (
-                      <button
-                        key={`bench-${p.id}`}
-                        type="button"
-                        className="lineup-bench__chip"
-                        draggable
-                        onDragStart={(e) => {
-                          e.dataTransfer.setData("text/player-id", p.id);
-                          e.dataTransfer.setData("text/slot-key", "");
-                        }}
-                      >
-                        {p.name}
-                        {p.jerseyNumber ? ` #${p.jerseyNumber}` : ""}
-                      </button>
-                    ))
-                  )}
-                </div>
+              <div className="lineup-dnd-help">Velg posisjon for hver spiller. Smart-fyll bruker spillerens foretrukne posisjon.</div>
+              <div className="btn-row" style={{ marginBottom: 8 }}>
+                <button
+                  type="button"
+                  className="btn btn--secondary"
+                  onClick={() => {
+                    const remaining = [...selectedRows];
+                    const slotOrder = ["gk", ...outfieldSlots.map((s) => s.key)];
+                    const next = {};
+                    const pickOne = (predicate) => {
+                      const idx = remaining.findIndex(predicate);
+                      if (idx < 0) return null;
+                      const [p] = remaining.splice(idx, 1);
+                      return p;
+                    };
+                    const gk = pickOne((p) => /målvakt/i.test(p.preferredPosition || "")) || remaining.shift() || null;
+                    if (gk) next[gk.id] = "gk";
+                    for (const slotKey of slotOrder.slice(1)) {
+                      const slot = outfieldSlots.find((s) => s.key === slotKey);
+                      if (!slot) continue;
+                      const pref =
+                        slot.role === "defender"
+                          ? /försvar/i
+                          : slot.role === "midfielder"
+                            ? /mittfält/i
+                            : /anfall/i;
+                      const player = pickOne((p) => pref.test(p.preferredPosition || "")) || pickOne((p) => /allround/i.test(p.preferredPosition || "")) || remaining.shift() || null;
+                      if (player) next[player.id] = slotKey;
+                    }
+                    for (const p of remaining) next[p.id] = "bench";
+                    setPositionDraftByPlayer((prev) => ({ ...prev, ...next }));
+                  }}
+                >
+                  Smart fyll
+                </button>
               </div>
-              {!startersUnique ? <p className="text-muted">Samma spelare kan inte ha flera startpositioner.</p> : null}
-              <h5 className="panel__title" style={{ fontSize: 14, margin: "10px 0 8px" }}>
-                Byten (ordning og hvem som bytter med hvem)
-              </h5>
-              {subsDraft.map((row, idx) => (
-                <div key={`sub-${idx}`} className="form-add" style={{ marginBottom: 8 }}>
-                  <div className="field">
-                    <span className="field__label">Ordning</span>
-                    <input
+              <div className="form-add">
+                {selectedRows.map((p) => (
+                  <div key={`pos-${p.id}`} className="field">
+                    <span className="field__label">
+                      {p.name} {p.jerseyNumber ? `#${p.jerseyNumber}` : ""}
+                    </span>
+                    <select
                       className="field__select"
-                      type="number"
-                      min={1}
-                      value={row.order}
+                      value={positionDraftByPlayer[p.id] || "bench"}
                       onChange={(e) =>
-                        setSubsDraft((prev) => prev.map((s, i) => (i === idx ? { ...s, order: Number(e.target.value || 1) } : s)))
+                        setPositionDraftByPlayer((prev) => ({
+                          ...prev,
+                          [p.id]: e.target.value,
+                        }))
                       }
-                    />
-                  </div>
-                  <div className="field">
-                    <span className="field__label">Ut</span>
-                    <select
-                      className="field__select"
-                      value={row.outPlayerId}
-                      onChange={(e) => setSubsDraft((prev) => prev.map((s, i) => (i === idx ? { ...s, outPlayerId: e.target.value } : s)))}
                     >
-                      <option value="">Välj</option>
-                      {selectedRows.map((p) => (
-                        <option key={`out-${p.id}`} value={p.id}>
-                          {p.name}
+                      <option value="bench">Bänk</option>
+                      <option value="gk">Målvakt</option>
+                      {outfieldSlots.map((slot) => (
+                        <option key={`opt-${slot.key}`} value={slot.key}>
+                          {slotLabelFromKey(slot.key, outfieldSlots)}
                         </option>
                       ))}
                     </select>
                   </div>
-                  <div className="field">
-                    <span className="field__label">In</span>
-                    <select
-                      className="field__select"
-                      value={row.inPlayerId}
-                      onChange={(e) => setSubsDraft((prev) => prev.map((s, i) => (i === idx ? { ...s, inPlayerId: e.target.value } : s)))}
-                    >
-                      <option value="">Välj</option>
-                      {selectedRows.map((p) => (
-                        <option key={`in-${p.id}`} value={p.id}>
-                          {p.name}
-                        </option>
-                      ))}
-                    </select>
-                  </div>
-                  <div className="field">
-                    <span className="field__label">Notis</span>
-                    <input
-                      className="field__input"
-                      value={row.note}
-                      onChange={(e) => setSubsDraft((prev) => prev.map((s, i) => (i === idx ? { ...s, note: e.target.value } : s)))}
-                    />
-                  </div>
-                </div>
-              ))}
+                ))}
+              </div>
+              {!startersUnique ? <p className="text-muted">En position kan bara ha en spelare. Välj unika positioner.</p> : null}
+              {benchPlayers.length > 0 ? (
+                <p className="text-muted">Bänk: {benchPlayers.map((p) => p.name).join(", ")}</p>
+              ) : null}
               <div className="btn-row" style={{ marginTop: 6 }}>
-                <button
-                  type="button"
-                  className="btn btn--secondary"
-                  onClick={() => setSubsDraft((prev) => [...prev, { order: prev.length + 1, outPlayerId: "", inPlayerId: "", note: "" }])}
-                >
-                  Lägg till byte
-                </button>
-                <button
-                  type="button"
-                  className="btn btn--secondary"
-                  disabled={!subsDraft.length}
-                  onClick={() => setSubsDraft((prev) => (prev.length > 1 ? prev.slice(0, -1) : prev))}
-                >
-                  Ta bort sista
-                </button>
                 <button
                   type="button"
                   className="btn btn--primary"
@@ -1027,9 +945,9 @@ function MatchCard({
                     setErr("");
                     try {
                       const starters = [
-                        { playerId: keeperId, role: "goalkeeper", lane: "central", order: 0 },
+                        { playerId: slotToPlayer.gk, role: "goalkeeper", lane: "central", order: 0 },
                         ...outfieldSlots.map((slot) => ({
-                          playerId: starterMap[slot.key],
+                          playerId: slotToPlayer[slot.key],
                           role: slot.role,
                           lane: slot.lane,
                           order: slot.order,
@@ -1041,7 +959,7 @@ function MatchCard({
                           formation: formationDraft,
                           side: sideDraft,
                           starters,
-                          substitutions: subsDraft,
+                          substitutions: [],
                         },
                       });
                       await load();
@@ -1065,30 +983,20 @@ function MatchCard({
                     x: slot.lane === "vänster" ? 24 : slot.lane === "höger" ? 76 : 50,
                     y: slot.role === "defender" ? 66 : slot.role === "midfielder" ? 48 : 30,
                   }))].map((slotNode) => {
-                    const playerId = slotNode.key === "gk" ? keeperId : starterMap[slotNode.key];
+                    const playerId = slotToPlayer[slotNode.key];
                     const player = playerId ? selectedById.get(playerId) : null;
                     return (
                       <div
                         key={slotNode.key}
                         className={`lineup-pitch__slot lineup-pitch__slot--${slotNode.role} ${player ? "is-filled" : ""}`}
                         style={{ left: `${slotNode.x}%`, top: `${slotNode.y}%` }}
-                        onDragOver={(e) => e.preventDefault()}
-                        onDrop={(e) => handleDropOnSlot(e, slotNode.key)}
                         title={player ? `${player.name}${player.jerseyNumber ? ` (#${player.jerseyNumber})` : ""}` : roleLabelSv(slotNode.role)}
                       >
                         {player ? (
-                          <button
-                            type="button"
-                            className={`lineup-pitch__player lineup-pitch__player--${slotNode.role}`}
-                            draggable
-                            onDragStart={(e) => {
-                              e.dataTransfer.setData("text/player-id", player.id);
-                              e.dataTransfer.setData("text/slot-key", slotNode.key);
-                            }}
-                          >
+                          <div className={`lineup-pitch__player lineup-pitch__player--${slotNode.role}`}>
                             <span className="lineup-pitch__number">{player.jerseyNumber || "?"}</span>
                             <span className="lineup-pitch__name">{player.name}</span>
-                          </button>
+                          </div>
                         ) : (
                           <span className="lineup-pitch__empty">{roleLabelSv(slotNode.role)}</span>
                         )}
