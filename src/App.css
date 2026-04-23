@@ -27,7 +27,7 @@ body {
 
 .app {
   width: 100%;
-  max-width: min(1400px, 98vw);
+  max-width: 100%;
   margin: 0 auto;
   padding: calc(var(--space) + env(safe-area-inset-top)) calc(var(--space) + env(safe-area-inset-right))
     calc(var(--space-lg) + env(safe-area-inset-bottom)) calc(var(--space) + env(safe-area-inset-left));
