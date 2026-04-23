@@ -1,7 +1,7 @@
 /* App-specifika komponenter (färger/tokens: src/index.css + shadcn) */
 
 :root {
-  --page-gutter: clamp(14px, 2.8vw, 24px);
+  --page-gutter: clamp(20px, 4.2vw, 40px);
 }
 
 *,
