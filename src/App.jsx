@@ -1004,7 +1004,7 @@ export default function App() {
   const [editYear, setEditYear] = useState("2016");
   const [overviewBirth, setOverviewBirth] = useState("all");
   const [overviewAge, setOverviewAge] = useState("all");
-  /** Underflikar inom Spelargrupp: spelarlista eller grupper */
+  /** Underflikar inom Spelargrupp: spelarlista, grupper eller tränare */
   const [playerSubTab, setPlayerSubTab] = useState("players");
   /** Underflikar inom Matcher: P10 / P11 */
   const [activeMatchId, setActiveMatchId] = useState(null);
@@ -1013,8 +1013,7 @@ export default function App() {
   const [installHint, setInstallHint] = useState("");
   const [icsUrl, setIcsUrl] = useState(DEFAULT_MINFOTBOLL_ICS_URL);
   const [syncingIcs, setSyncingIcs] = useState(false);
-  const [coachDraft, setCoachDraft] = useState("");
-  const [coachDraftDirty, setCoachDraftDirty] = useState(false);
+  const [coachesDraft, setCoachesDraft] = useState([]);
   const {
     needRefresh: [needRefresh, setNeedRefresh],
     updateServiceWorker,
@@ -1108,11 +1107,21 @@ export default function App() {
   }, [playerSubTab, overviewBirth, overviewAge, activeMatchId, icsUrl]);
 
   useEffect(() => {
-    const list = Array.isArray(state?.coachNames) ? state.coachNames : [];
-    if (!list.length) return;
-    if (coachDraftDirty) return;
-    setCoachDraft(list.join(", "));
-  }, [state?.coachNames, coachDraftDirty]);
+    const incoming = Array.isArray(state?.coaches)
+      ? state.coaches
+      : Array.isArray(state?.coachNames)
+        ? state.coachNames.map((name, i) => ({ id: `coach-${i + 1}`, name, phone: "", role: "", note: "" }))
+        : [];
+    setCoachesDraft(
+      incoming.map((c, i) => ({
+        id: c?.id ? String(c.id) : `coach-${i + 1}`,
+        name: String(c?.name || ""),
+        phone: String(c?.phone || ""),
+        role: String(c?.role || ""),
+        note: String(c?.note || ""),
+      })),
+    );
+  }, [state?.coaches, state?.coachNames]);
 
   useEffect(() => {
     if (!okMsg) return;
@@ -1232,7 +1241,12 @@ export default function App() {
     rotationView?.groupsValid !== false && rotationView?.groups2016Valid !== false;
 
   const [simulation, setSimulation] = useState(null);
-  const coachNames = state?.coachNames || ["Jonas", "Per", "Anders", "Kim"];
+  const coachNames = useMemo(() => {
+    if (Array.isArray(state?.coaches) && state.coaches.length) {
+      return state.coaches.map((c) => c.name).filter(Boolean);
+    }
+    return state?.coachNames || ["Jonas", "Per", "Anders", "Kim"];
+  }, [state?.coaches, state?.coachNames]);
   const teamNames = useMemo(() => {
     const set = new Set();
     for (const m of state?.matches || []) {
@@ -1343,24 +1357,28 @@ export default function App() {
     }
   }
 
-  async function saveCoachNames() {
-    const names = coachDraft
-      .split(",")
-      .map((n) => n.trim())
-      .filter(Boolean);
-    if (!names.length) {
-      setErr("Ange minst ett tränarnamn.");
+  async function saveCoaches() {
+    const cleaned = coachesDraft
+      .map((c, i) => ({
+        id: c?.id ? String(c.id) : `coach-${i + 1}`,
+        name: String(c?.name || "").trim(),
+        phone: String(c?.phone || "").trim(),
+        role: String(c?.role || "").trim(),
+        note: String(c?.note || "").trim(),
+      }))
+      .filter((c) => c.name);
+    if (!cleaned.length) {
+      setErr("Ange minst en tränare.");
       return;
     }
     setErr("");
     try {
       const next = await api("/api/settings/coaches", {
         method: "PUT",
-        body: { coachNames: names },
+        body: { coaches: cleaned },
       });
       setState(next);
-      setCoachDraftDirty(false);
-      setOkMsg("Tränarnamn uppdaterade.");
+      setOkMsg("Tränarlista uppdaterad.");
     } catch (e) {
       setErr(e.message);
     }
@@ -1602,6 +1620,15 @@ export default function App() {
             >
               Grupper
             </button>
+            <button
+              type="button"
+              role="tab"
+              className="segmented__btn"
+              aria-selected={playerSubTab === "coaches"}
+              onClick={() => setPlayerSubTab("coaches")}
+            >
+              Tränare
+            </button>
           </div>
 
           {playerSubTab === "players" && (
@@ -1829,6 +1856,99 @@ export default function App() {
                 setErr={setErr}
                 revision={state?.meta?.revision}
               />
+            </div>
+          )}
+
+          {playerSubTab === "coaches" && (
+            <div role="tabpanel" aria-label="Tränare">
+              <h3 className="panel__title" style={{ fontSize: 17, marginTop: 0 }}>
+                Tränare
+              </h3>
+              <p className="panel__lead">Lägg in namn, telefon och extra info för varje tränare.</p>
+              <div className="group group--flush">
+                {coachesDraft.map((c, idx) => (
+                  <div key={c.id || idx} className="list-row">
+                    <div className="field">
+                      <span className="field__label">Namn</span>
+                      <input
+                        className="field__input"
+                        value={c.name}
+                        onChange={(e) =>
+                          setCoachesDraft((prev) =>
+                            prev.map((row, i) => (i === idx ? { ...row, name: e.target.value } : row)),
+                          )
+                        }
+                      />
+                    </div>
+                    <div className="field">
+                      <span className="field__label">Telefon</span>
+                      <input
+                        className="field__input"
+                        value={c.phone}
+                        onChange={(e) =>
+                          setCoachesDraft((prev) =>
+                            prev.map((row, i) => (i === idx ? { ...row, phone: e.target.value } : row)),
+                          )
+                        }
+                        placeholder="+46..."
+                      />
+                    </div>
+                    <div className="field">
+                      <span className="field__label">Roll</span>
+                      <input
+                        className="field__input"
+                        value={c.role}
+                        onChange={(e) =>
+                          setCoachesDraft((prev) =>
+                            prev.map((row, i) => (i === idx ? { ...row, role: e.target.value } : row)),
+                          )
+                        }
+                        placeholder="Huvudtränare / Assisterande"
+                      />
+                    </div>
+                    <div className="field">
+                      <span className="field__label">Notis</span>
+                      <textarea
+                        className="field__input"
+                        rows={2}
+                        value={c.note}
+                        onChange={(e) =>
+                          setCoachesDraft((prev) =>
+                            prev.map((row, i) => (i === idx ? { ...row, note: e.target.value } : row)),
+                          )
+                        }
+                        placeholder="Valfri info"
+                      />
+                    </div>
+                    <div className="btn-row">
+                      <button
+                        type="button"
+                        className="btn btn--plain btn--sm"
+                        onClick={() => setCoachesDraft((prev) => prev.filter((_, i) => i !== idx))}
+                      >
+                        Ta bort
+                      </button>
+                    </div>
+                  </div>
+                ))}
+              </div>
+              <div className="btn-row" style={{ marginTop: 10 }}>
+                <button
+                  type="button"
+                  className="btn btn--secondary btn--sm"
+                  onClick={() =>
+                    setCoachesDraft((prev) => [
+                      ...prev,
+                      { id: `coach-${Date.now()}-${prev.length + 1}`, name: "", phone: "", role: "", note: "" },
+                    ])
+                  }
+                >
+                  Lägg till tränare
+                </button>
+                <button type="button" className="btn btn--primary btn--sm" onClick={() => saveCoaches().catch(() => null)}>
+                  Spara tränare
+                </button>
+              </div>
             </div>
           )}
         </section>
@@ -2153,30 +2273,6 @@ export default function App() {
             </div>
           </div>
 
-          <div className="group" style={{ padding: 12, marginBottom: 10 }}>
-            <p className="panel__lead" style={{ margin: "0 0 8px" }}>
-              Tränarnamn (kommentarer)
-            </p>
-            <div className="field" style={{ marginBottom: 8 }}>
-              <label className="field__label" htmlFor="coach-names">
-                Komma-separerade namn
-              </label>
-              <input
-                id="coach-names"
-                className="field__input"
-                type="text"
-                value={coachDraft}
-                onChange={(e) => {
-                  setCoachDraft(e.target.value);
-                  setCoachDraftDirty(true);
-                }}
-                placeholder="Jonas, Per, Anders, Kim"
-              />
-            </div>
-            <button type="button" className="btn btn--secondary btn--sm" onClick={() => saveCoachNames().catch(() => null)}>
-              Spara tränarnamn
-            </button>
-          </div>
         </section>
       )}
     </div>

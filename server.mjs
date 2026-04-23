@@ -254,6 +254,16 @@ function initialMatches() {
   }));
 }
 
+function defaultCoaches() {
+  return COACH_NAMES.map((name, i) => ({
+    id: `coach-${i + 1}`,
+    name,
+    phone: "",
+    role: "",
+    note: "",
+  }));
+}
+
 function defaultState() {
   try {
     const rawSeed = fs.readFileSync(SEED_PATH, "utf8");
@@ -278,6 +288,7 @@ function defaultState() {
     groups2016Extra: built6.groups2016Extra,
     fixturesP11: [],
     coachNames: [...COACH_NAMES],
+    coaches: defaultCoaches(),
     teamLogos: {},
   };
 }
@@ -435,6 +446,35 @@ function migrateStateShape(data) {
     data.coachNames = [...COACH_NAMES];
     dirty = true;
   }
+  if (!Array.isArray(data.coaches) || data.coaches.length === 0) {
+    const srcNames = Array.isArray(data.coachNames) && data.coachNames.length ? data.coachNames : [...COACH_NAMES];
+    data.coaches = srcNames.map((name, i) => ({
+      id: `coach-${i + 1}`,
+      name: String(name || "").trim(),
+      phone: "",
+      role: "",
+      note: "",
+    }));
+    dirty = true;
+  } else {
+    const normalized = [];
+    for (let i = 0; i < data.coaches.length; i++) {
+      const c = data.coaches[i] || {};
+      const name = String(c.name || "").trim();
+      if (!name) continue;
+      normalized.push({
+        id: c.id ? String(c.id) : `coach-${i + 1}`,
+        name,
+        phone: String(c.phone || "").trim(),
+        role: String(c.role || "").trim(),
+        note: String(c.note || "").trim(),
+      });
+    }
+    if (!normalized.length) normalized.push(...defaultCoaches());
+    data.coaches = normalized.slice(0, 20);
+    data.coachNames = data.coaches.map((c) => c.name);
+    dirty = true;
+  }
   if (!data.teamLogos || typeof data.teamLogos !== "object" || Array.isArray(data.teamLogos)) {
     data.teamLogos = {};
     dirty = true;
@@ -567,11 +607,24 @@ function writeState(state) {
 
 function jsonState(state) {
   syncMatchShape(state);
+  const coaches =
+    Array.isArray(state.coaches) && state.coaches.length
+      ? state.coaches
+          .map((c, i) => ({
+            id: c?.id ? String(c.id) : `coach-${i + 1}`,
+            name: String(c?.name || "").trim(),
+            phone: String(c?.phone || "").trim(),
+            role: String(c?.role || "").trim(),
+            note: String(c?.note || "").trim(),
+          }))
+          .filter((c) => c.name)
+      : defaultCoaches();
   return {
     ...state,
     meta: state.meta || { revision: 1, updatedAt: new Date().toISOString() },
     rotationView: buildRotationView(state),
-    coachNames: Array.isArray(state.coachNames) && state.coachNames.length ? state.coachNames : [...COACH_NAMES],
+    coaches,
+    coachNames: coaches.map((c) => c.name),
     teamLogos: state.teamLogos && typeof state.teamLogos === "object" ? state.teamLogos : {},
   };
 }
@@ -648,11 +701,27 @@ app.post("/api/state/import", (req, res) => {
 
 app.put("/api/settings/coaches", (req, res) => {
   const state = readState();
-  const names = Array.isArray(req.body?.coachNames)
-    ? req.body.coachNames.map((n) => String(n || "").trim()).filter(Boolean)
-    : [];
-  if (!names.length) return res.status(400).json({ error: "Ange minst ett tränarnamn." });
-  state.coachNames = [...new Set(names)].slice(0, 10);
+  const incoming = Array.isArray(req.body?.coaches)
+    ? req.body.coaches
+    : Array.isArray(req.body?.coachNames)
+      ? req.body.coachNames.map((name) => ({ name }))
+      : [];
+  const coaches = [];
+  for (let i = 0; i < incoming.length; i++) {
+    const row = incoming[i] || {};
+    const name = String(row.name || "").trim();
+    if (!name) continue;
+    coaches.push({
+      id: row.id ? String(row.id) : `coach-${Date.now()}-${i}`,
+      name,
+      phone: String(row.phone || "").trim(),
+      role: String(row.role || "").trim(),
+      note: String(row.note || "").trim(),
+    });
+  }
+  if (!coaches.length) return res.status(400).json({ error: "Ange minst en tränare." });
+  state.coaches = coaches.slice(0, 20);
+  state.coachNames = state.coaches.map((c) => c.name);
   writeState(state);
   res.json(jsonState(state));
 });
