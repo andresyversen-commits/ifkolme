@@ -219,13 +219,25 @@ body {
     right: 0;
     bottom: 0;
     z-index: 40;
-    margin: 0;
-    box-shadow: 0 10px 30px rgb(15 23 42 / 0.14);
-    backdrop-filter: saturate(160%) blur(14px);
+    margin: 0 !important;
+    margin-top: 0 !important;
+    margin-bottom: 0 !important;
     border-radius: 0;
-    border-left: none;
-    border-right: none;
-    padding-bottom: env(safe-area-inset-bottom);
+    border: none;
+    border-top: 1px solid color-mix(in oklab, var(--foreground) 14%, var(--border));
+    /* Solid bar — glass blur gjorde den nesten usynlig mot gradientbakgrunn */
+    background: color-mix(in oklab, var(--bg-elevated) 98%, var(--foreground));
+    backdrop-filter: none;
+    -webkit-backdrop-filter: none;
+    box-shadow:
+      0 -1px 0 rgb(255 255 255 / 0.65) inset,
+      0 -10px 28px rgb(15 23 42 / 0.12);
+    /* Ekstra padding under tappene + safe area (hjem-indikator) */
+    padding-top: 6px;
+    padding-bottom: max(10px, env(safe-area-inset-bottom, 0px));
+    /* Unngå subpiksel-glipp mot kanten på iOS */
+    transform: translateZ(0);
+    -webkit-transform: translateZ(0);
   }
 
   .app-bottom-nav .segmented__btn {
@@ -2331,7 +2343,7 @@ body {
     font-size: 19px;
   }
 
-  .segmented {
+  .segmented:not(.app-bottom-nav) {
     margin-top: 12px;
     margin-bottom: 16px;
   }
