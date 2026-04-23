@@ -2569,7 +2569,6 @@ export default function App() {
                                   </div>
                                   <div className="calendar-event__time">
                                     {calendarTimeLabel(m)}
-                                    <span className="calendar-event__hint">Öppna</span>
                                   </div>
                                 </button>
                               );

@@ -315,6 +315,66 @@ async function ensureStateTable() {
   `);
 }
 
+async function ensureTeamLogosTable() {
+  if (!settingsPool) throw new Error("DATABASE_URL mangler");
+  await settingsPool.query(`
+    CREATE TABLE IF NOT EXISTS team_logos (
+      team_key TEXT PRIMARY KEY,
+      logo_data TEXT NOT NULL,
+      updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    )
+  `);
+}
+
+async function loadTeamLogosMap() {
+  if (!settingsPool) return {};
+  try {
+    await ensureTeamLogosTable();
+    const r = await settingsPool.query("SELECT team_key, logo_data FROM team_logos");
+    const map = {};
+    for (const row of r.rows || []) {
+      const key = normalizeTeamKey(row.team_key);
+      const val = String(row.logo_data || "").trim();
+      if (!key || !val) continue;
+      map[key] = val;
+    }
+    return map;
+  } catch (e) {
+    console.warn("Neon team logos read failed:", e.message);
+    return {};
+  }
+}
+
+async function upsertTeamLogo(teamKey, logoDataUrl) {
+  if (!settingsPool) return;
+  const key = normalizeTeamKey(teamKey);
+  const value = String(logoDataUrl || "").trim();
+  if (!key || !value) return;
+  try {
+    await ensureTeamLogosTable();
+    await settingsPool.query(
+      `INSERT INTO team_logos (team_key, logo_data, updated_at)
+       VALUES ($1, $2, NOW())
+       ON CONFLICT (team_key) DO UPDATE SET logo_data = EXCLUDED.logo_data, updated_at = NOW()`,
+      [key, value],
+    );
+  } catch (e) {
+    console.warn("Neon team logo upsert failed:", e.message);
+  }
+}
+
+async function deleteTeamLogo(teamKey) {
+  if (!settingsPool) return;
+  const key = normalizeTeamKey(teamKey);
+  if (!key) return;
+  try {
+    await ensureTeamLogosTable();
+    await settingsPool.query("DELETE FROM team_logos WHERE team_key = $1", [key]);
+  } catch (e) {
+    console.warn("Neon team logo delete failed:", e.message);
+  }
+}
+
 async function loadRemoteState() {
   if (!settingsPool) throw new Error("DATABASE_URL mangler");
   await ensureStateTable();
@@ -795,6 +855,18 @@ async function readState() {
     bootstrappedFromFallback = bootstrappedFromFallback || Boolean(settingsPool);
   }
   let dirty = migrateStateShape(data);
+  const dbLogos = await loadTeamLogosMap();
+  if (Object.keys(dbLogos).length > 0) {
+    if (!data.teamLogos || typeof data.teamLogos !== "object") data.teamLogos = {};
+    let mergedAny = false;
+    for (const [k, v] of Object.entries(dbLogos)) {
+      if (!data.teamLogos[k]) {
+        data.teamLogos[k] = v;
+        mergedAny = true;
+      }
+    }
+    if (mergedAny) dirty = true;
+  }
   if (ensureMeta(data)) dirty = true;
   if (migrateAvailability(data)) dirty = true;
   if (repairGroups2015IfNeeded(data)) dirty = true;
@@ -851,6 +923,13 @@ async function writeState(state) {
   }
   await persistRemoteState(state);
   await persistRemoteSettings(state);
+  if (state.teamLogos && typeof state.teamLogos === "object") {
+    for (const [k, v] of Object.entries(state.teamLogos)) {
+      if (typeof v === "string" && v.trim()) {
+        await upsertTeamLogo(k, v);
+      }
+    }
+  }
 }
 
 function jsonState(state) {
@@ -1012,6 +1091,7 @@ app.put("/api/team-logos", async (req, res) => {
   if (logoDataUrl === null) {
     delete state.teamLogos[team];
     delete state.teamLogos[teamKey];
+    await deleteTeamLogo(teamKey);
     await writeState(state);
     return res.json(jsonState(state));
   }
@@ -1020,6 +1100,7 @@ app.put("/api/team-logos", async (req, res) => {
     return res.status(400).json({ error: "Ogiltig bild. Ladda upp PNG/JPG/WebP/GIF/SVG." });
   }
   state.teamLogos[teamKey] = value;
+  await upsertTeamLogo(teamKey, value);
   await writeState(state);
   res.json(jsonState(state));
 });
