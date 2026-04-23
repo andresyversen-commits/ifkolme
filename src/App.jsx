@@ -1325,7 +1325,8 @@ export default function App() {
   const [playerSubTab, setPlayerSubTab] = useState("players");
   /** Underflikar inom Matcher: P10 / P11 */
   const [activeMatchId, setActiveMatchId] = useState(null);
-  const [matchDetailOpenMobile, setMatchDetailOpenMobile] = useState(false);
+  const [showMatchCalendar, setShowMatchCalendar] = useState(false);
+  const [playersSort, setPlayersSort] = useState({ key: "birthYear", dir: "asc" });
   const [importing, setImporting] = useState(false);
   const [deferredInstallPrompt, setDeferredInstallPrompt] = useState(null);
   const [installHint, setInstallHint] = useState("");
@@ -1591,6 +1592,44 @@ export default function App() {
     () => (state?.players ? state.players.filter((p) => p.birthYear === 2016) : []),
     [state?.players]
   );
+  const sortedPlayersTable = useMemo(() => {
+    const rows = [...(state?.players || [])];
+    const dirMul = playersSort.dir === "desc" ? -1 : 1;
+    const valueOf = (p, key) => {
+      if (key === "name") return p.name || "";
+      if (key === "jerseyNumber") return Number(p.jerseyNumber || 0);
+      if (key === "preferredPosition") return p.preferredPosition || "";
+      if (key === "birthYear") return Number(p.birthYear || 0);
+      if (key === "group") return p.birthYear === 2015 ? groupLetterFor2015Player(p.id, state?.groups2015) || "" : "";
+      if (key === "matchesPlayed") return Number(p.matchesPlayed || 0);
+      if (key === "lastPlayedMatchNumber") return Number(p.lastPlayedMatchNumber || 0);
+      if (key === "available") return p.available === false ? 0 : 1;
+      return "";
+    };
+    rows.sort((a, b) => {
+      const av = valueOf(a, playersSort.key);
+      const bv = valueOf(b, playersSort.key);
+      if (typeof av === "number" && typeof bv === "number") {
+        if (av !== bv) return (av - bv) * dirMul;
+      } else {
+        const cmp = String(av).localeCompare(String(bv), "sv", { sensitivity: "base" });
+        if (cmp !== 0) return cmp * dirMul;
+      }
+      return a.name.localeCompare(b.name, "sv");
+    });
+    return rows;
+  }, [state?.players, state?.groups2015, playersSort]);
+
+  const togglePlayersSort = useCallback((key) => {
+    setPlayersSort((prev) => ({
+      key,
+      dir: prev.key === key && prev.dir === "asc" ? "desc" : "asc",
+    }));
+  }, []);
+  const sortMark = useCallback((key) => {
+    if (playersSort.key !== key) return "";
+    return playersSort.dir === "asc" ? " ↑" : " ↓";
+  }, [playersSort]);
 
   const matchGroupsValid =
     rotationView?.groupsValid !== false && rotationView?.groups2016Valid !== false;
@@ -1640,9 +1679,7 @@ export default function App() {
   );
   const openMatchDetail = useCallback((matchId) => {
     setActiveMatchId(matchId);
-    if (typeof window !== "undefined" && window.matchMedia("(max-width: 980px)").matches) {
-      setMatchDetailOpenMobile(true);
-    }
+    setShowMatchCalendar(false);
   }, []);
 
   function playerName(id) {
@@ -2072,24 +2109,19 @@ export default function App() {
                 <table className="players-table">
                   <thead>
                     <tr>
-                      <th>Namn</th>
-                      <th>Nr</th>
-                      <th>Position</th>
-                      <th>År</th>
-                      <th>Grupp</th>
-                      <th>Matcher</th>
-                      <th>Senast</th>
-                      <th>Status</th>
+                      <th><button type="button" className="players-sort-btn" onClick={() => togglePlayersSort("name")}>{`Namn${sortMark("name")}`}</button></th>
+                      <th><button type="button" className="players-sort-btn" onClick={() => togglePlayersSort("jerseyNumber")}>{`Nr${sortMark("jerseyNumber")}`}</button></th>
+                      <th><button type="button" className="players-sort-btn" onClick={() => togglePlayersSort("preferredPosition")}>{`Position${sortMark("preferredPosition")}`}</button></th>
+                      <th><button type="button" className="players-sort-btn" onClick={() => togglePlayersSort("birthYear")}>{`År${sortMark("birthYear")}`}</button></th>
+                      <th><button type="button" className="players-sort-btn" onClick={() => togglePlayersSort("group")}>{`Grupp${sortMark("group")}`}</button></th>
+                      <th><button type="button" className="players-sort-btn" onClick={() => togglePlayersSort("matchesPlayed")}>{`Matcher${sortMark("matchesPlayed")}`}</button></th>
+                      <th><button type="button" className="players-sort-btn" onClick={() => togglePlayersSort("lastPlayedMatchNumber")}>{`Senast${sortMark("lastPlayedMatchNumber")}`}</button></th>
+                      <th><button type="button" className="players-sort-btn" onClick={() => togglePlayersSort("available")}>{`Status${sortMark("available")}`}</button></th>
                       <th className="actions-cell" />
                     </tr>
                   </thead>
                   <tbody>
-                    {[...state.players]
-                      .sort((a, b) => {
-                        if (a.birthYear !== b.birthYear) return a.birthYear - b.birthYear;
-                        return a.name.localeCompare(b.name, "sv");
-                      })
-                      .map((p) => {
+                    {sortedPlayersTable.map((p) => {
                         const gLet = p.birthYear === 2015 ? groupLetterFor2015Player(p.id, state.groups2015) : null;
                         if (editingId === p.id) {
                           return (
@@ -2411,8 +2443,17 @@ export default function App() {
           <p className="panel__lead" style={{ marginTop: 0 }}>
             Nästa grupp i tur: <strong>{rotationView?.nextGroupLabel ?? "Grupp A"}</strong>
           </p>
-          <div className={`matches-layout ${matchDetailOpenMobile ? "matches-layout--detail-open" : ""}`}>
-            <div className="matches-layout__calendar">
+          <div className="matches-layout">
+            <div className="matches-layout__toolbar">
+              <button
+                type="button"
+                className="btn btn--secondary btn--sm"
+                onClick={() => setShowMatchCalendar((v) => !v)}
+              >
+                {showMatchCalendar ? "Dölj kalender" : "Visa kalender"}
+              </button>
+            </div>
+            {showMatchCalendar && <div className="matches-layout__calendar">
               <h3 className="panel__title" style={{ fontSize: 17, margin: "0 0 8px" }}>
                 Matchkalender
               </h3>
@@ -2491,18 +2532,9 @@ export default function App() {
                   </div>
                 </section>
               </div>
-            </div>
+            </div>}
 
             <div className="matches-layout__detail">
-              <div className="matches-layout__detail-head">
-                <button
-                  type="button"
-                  className="btn btn--secondary btn--sm matches-layout__back"
-                  onClick={() => setMatchDetailOpenMobile(false)}
-                >
-                  ← Till kalender
-                </button>
-              </div>
               {activeMatch ? (
                 <div className="section-spacer">
                   <MatchCard

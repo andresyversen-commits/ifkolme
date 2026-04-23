@@ -663,6 +663,17 @@ body {
   white-space: nowrap;
 }
 
+.players-sort-btn {
+  border: none;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  text-transform: inherit;
+  letter-spacing: inherit;
+  padding: 0;
+  cursor: pointer;
+}
+
 .players-table td {
   padding: 6px 10px;
   border-top: 1px solid var(--separator);
@@ -1331,29 +1342,10 @@ body {
   gap: 14px;
 }
 
-.matches-layout__detail-head {
-  display: none;
-}
-
-.matches-layout__back {
-  display: none;
-}
-
-@media (min-width: 981px) {
-  .matches-layout {
-    grid-template-columns: minmax(360px, 0.95fr) minmax(420px, 1.05fr);
-    align-items: start;
-    gap: 16px;
-  }
-
-  .matches-layout__calendar {
-    position: sticky;
-    top: calc(8px + env(safe-area-inset-top));
-  }
-
-  .matches-layout__detail .section-spacer {
-    margin-top: 0;
-  }
+.matches-layout__toolbar {
+  display: flex;
+  justify-content: flex-start;
+  margin-bottom: 2px;
 }
 
 .calendar-nav {
@@ -1886,23 +1878,6 @@ body {
 
   .lineup-pitch__player {
     max-width: 124px;
-  }
-
-  .matches-layout.matches-layout--detail-open .matches-layout__calendar {
-    display: none;
-  }
-
-  .matches-layout:not(.matches-layout--detail-open) .matches-layout__detail {
-    display: none;
-  }
-
-  .matches-layout__detail-head {
-    display: block;
-    margin: 0 0 8px;
-  }
-
-  .matches-layout__back {
-    display: inline-flex;
   }
 
   .logo-manager__row {
