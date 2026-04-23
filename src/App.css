@@ -1,7 +1,7 @@
 /* App-specifika komponenter (färger/tokens: src/index.css + shadcn) */
 
 :root {
-  --page-gutter: clamp(20px, 4.2vw, 40px);
+  --page-gutter: clamp(28px, 6vw, 72px);
 }
 
 *,
@@ -172,6 +172,12 @@ body {
   .app-bottom-nav .segmented__btn {
     min-height: 44px;
     font-size: 13px;
+  }
+}
+
+@media (max-width: 900px) {
+  :root {
+    --page-gutter: clamp(20px, 5vw, 40px);
   }
 }
 
@@ -1838,6 +1844,10 @@ body {
 }
 
 @media (max-width: 480px) {
+  :root {
+    --page-gutter: clamp(14px, 4.8vw, 24px);
+  }
+
   .app {
     padding-left: var(--page-gutter-safe-left);
     padding-right: var(--page-gutter-safe-right);
