@@ -1340,7 +1340,22 @@ export default function App() {
   const {
     needRefresh: [needRefresh, setNeedRefresh],
     updateServiceWorker,
-  } = useRegisterSW();
+  } = useRegisterSW({
+    onRegisteredSW(_swUrl, registration) {
+      if (!registration) return;
+      const triggerUpdate = () => registration.update().catch(() => null);
+      triggerUpdate();
+      // Keep PWA clients in sync with the latest deploy.
+      const intervalId = window.setInterval(triggerUpdate, 60 * 1000);
+      window.addEventListener("focus", triggerUpdate);
+      document.addEventListener("visibilitychange", triggerUpdate);
+      return () => {
+        window.clearInterval(intervalId);
+        window.removeEventListener("focus", triggerUpdate);
+        document.removeEventListener("visibilitychange", triggerUpdate);
+      };
+    },
+  });
 
   const load = useCallback(async (opts = {}) => {
     if (!opts.silent) setErr("");
@@ -1380,6 +1395,15 @@ export default function App() {
       })
       .finally(() => setLoading(false));
   }, [load]);
+
+  useEffect(() => {
+    if (!needRefresh) return;
+    // Avoid stale UI from lingering service workers in installed app mode.
+    const timer = window.setTimeout(() => {
+      updateServiceWorker(true);
+    }, 900);
+    return () => window.clearTimeout(timer);
+  }, [needRefresh, updateServiceWorker]);
 
   useEffect(() => {
     if (!state || restoredSettingsRef.current || restoringSettingsRef.current) return;
