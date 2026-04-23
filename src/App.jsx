@@ -248,10 +248,12 @@ function CalendarEventCrest({ name, logoUrl }) {
 }
 
 /** Seriekort (serie, tid, lag). */
-function MinFotbollFixture({ fixture }) {
+function MinFotbollFixture({ fixture, getStoredTeamLogo }) {
   if (!fixture) return null;
   const dateLabel = formatFixtureDateSv(fixture.date);
   const timeIsPlaceholder = fixture.time === "00:00";
+  const homeLogo = fixture.homeLogo || getStoredTeamLogo?.(fixture.home);
+  const awayLogo = fixture.awayLogo || getStoredTeamLogo?.(fixture.away);
   return (
     <div className="fixture-block">
       <header className="fixture-block__head">
@@ -260,7 +262,7 @@ function MinFotbollFixture({ fixture }) {
       </header>
       <div className="fixture-block__row">
         <div className="fixture-block__side fixture-block__side--home">
-          <FixtureCrest name={fixture.home} logoUrl={fixture.homeLogo} />
+          <FixtureCrest name={fixture.home} logoUrl={homeLogo} />
           <span className="fixture-block__club">{fixture.home}</span>
         </div>
         <div className="fixture-block__center">
@@ -273,7 +275,7 @@ function MinFotbollFixture({ fixture }) {
           <span className="fixture-block__date">{dateLabel}</span>
         </div>
         <div className="fixture-block__side fixture-block__side--away">
-          <FixtureCrest name={fixture.away} logoUrl={fixture.awayLogo} />
+          <FixtureCrest name={fixture.away} logoUrl={awayLogo} />
           <span className="fixture-block__club">{fixture.away}</span>
         </div>
       </div>
@@ -542,6 +544,7 @@ function MatchCard({
   onCopied,
   cardTitle = "Match",
   displayNumber,
+  getStoredTeamLogo,
 }) {
   const squadMode = matchSquadMode(m);
   const series = typeof m.fixture?.series === "string" ? m.fixture.series : "";
@@ -763,7 +766,7 @@ function MatchCard({
 
   return (
     <article className="match-card">
-      {m.fixture ? <MinFotbollFixture fixture={m.fixture} /> : null}
+      {m.fixture ? <MinFotbollFixture fixture={m.fixture} getStoredTeamLogo={getStoredTeamLogo} /> : null}
       <div className="match-card__inner">
       <div className="match-card__head match-card__headrow">
         <h3 className="match-card__label">
@@ -2608,6 +2611,7 @@ export default function App() {
                     onCopied={setOkMsg}
                     cardTitle="Match"
                     displayNumber={activeMatch?.number}
+                    getStoredTeamLogo={getStoredTeamLogo}
                   />
                 </div>
               ) : (
