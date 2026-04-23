@@ -2,6 +2,7 @@
 
 :root {
   --page-gutter: clamp(28px, 6vw, 72px);
+  --content-max-width: 1440px;
 }
 
 *,
@@ -32,11 +33,13 @@ body {
 #root {
   min-height: 100dvh;
   overflow-x: hidden;
+  width: 100%;
+  max-width: 100%;
 }
 
 .app {
   width: 100%;
-  max-width: 100%;
+  max-width: var(--content-max-width);
   margin: 0 auto;
   padding-top: calc(var(--space) + env(safe-area-inset-top));
   padding-right: var(--page-gutter-safe-right);
@@ -48,6 +51,7 @@ body {
 
 .app > * {
   max-width: 100%;
+  min-width: 0;
 }
 
 .app-header {
@@ -175,6 +179,12 @@ body {
   }
 }
 
+@media (max-width: 1200px) {
+  :root {
+    --content-max-width: 100%;
+  }
+}
+
 @media (max-width: 900px) {
   :root {
     --page-gutter: clamp(20px, 5vw, 40px);
@@ -296,12 +306,21 @@ body {
   box-shadow: var(--shadow-card);
   border: 1px solid color-mix(in oklab, var(--separator) 85%, white);
   overflow: hidden;
+  width: 100%;
+  max-width: 100%;
+  min-width: 0;
 }
 
 .match-card__inner {
-  padding: 16px 18px 18px;
+  padding: 18px 22px 20px;
   min-width: 0;
   width: 100%;
+  max-width: 100%;
+  overflow-x: clip;
+}
+
+.match-card {
+  margin-bottom: 22px;
 }
 
 .match-card__head {
@@ -383,6 +402,9 @@ body {
   flex-direction: column;
   gap: 14px;
   margin-bottom: 20px;
+  width: 100%;
+  max-width: 100%;
+  min-width: 0;
 }
 
 @media (min-width: 540px) {
@@ -407,6 +429,8 @@ body {
   flex-direction: column;
   gap: 6px;
   width: 100%;
+  min-width: 0;
+  max-width: 100%;
 }
 
 .field__label {
@@ -421,6 +445,7 @@ body {
 .field__input,
 .field__select {
   width: 100%;
+  max-width: 100%;
   min-height: var(--touch);
   padding: 10px 14px;
   font-size: 17px;
@@ -1051,6 +1076,8 @@ body {
   grid-template-columns: 1fr;
   gap: 12px;
   width: 100%;
+  max-width: 100%;
+  min-width: 0;
 }
 
 .lineup-player-grid .field {
@@ -1416,12 +1443,22 @@ body {
 .matches-layout {
   display: grid;
   gap: 14px;
+  width: 100%;
+  max-width: 100%;
+  min-width: 0;
 }
 
 .matches-layout__toolbar {
   display: flex;
   justify-content: flex-start;
   margin-bottom: 2px;
+}
+
+.matches-layout__calendar,
+.matches-layout__detail {
+  width: 100%;
+  max-width: 100%;
+  min-width: 0;
 }
 
 .calendar-nav {
@@ -1886,7 +1923,7 @@ body {
   }
 
   .match-card__inner {
-    padding: 14px 14px 16px;
+    padding: 14px 16px 16px;
   }
 
   .match-card__headrow {
