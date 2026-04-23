@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import * as XLSX from "xlsx";
 import { useRegisterSW } from "virtual:pwa-register/react";
 import { Button } from "@/components/ui/button";
@@ -53,6 +53,7 @@ const LS_STATE_KEY = "lagval.state.v1";
 const LS_UI_KEY = "lagval.ui.v1";
 const DEFAULT_MINFOTBOLL_ICS_URL =
   "webcal://minfotboll-api.azurewebsites.net/api/ExternalCalendarAPI/GetMemberCalendar/dmJFMkpKuMBlDjjZjRJNMKsxWnquLwbT.ics";
+const DEFAULT_COACH_NAMES = ["Jonas", "Per", "Anders", "Kim"];
 
 function seasonYear() {
   return new Date().getFullYear();
@@ -1003,6 +1004,9 @@ export default function App() {
   const [syncingIcs, setSyncingIcs] = useState(false);
   const [coachesDraft, setCoachesDraft] = useState([]);
   const [coachesDraftDirty, setCoachesDraftDirty] = useState(false);
+  const cachedSnapshotRef = useRef(null);
+  const restoringSettingsRef = useRef(false);
+  const restoredSettingsRef = useRef(false);
   const {
     needRefresh: [needRefresh, setNeedRefresh],
     updateServiceWorker,
@@ -1030,6 +1034,7 @@ export default function App() {
         const parsed = JSON.parse(cached);
         if (parsed && parsed.matches && parsed.players) {
           setState(parsed);
+          cachedSnapshotRef.current = parsed;
           hasCachedState = true;
           setLoading(false);
         }
@@ -1052,6 +1057,54 @@ export default function App() {
       })
       .finally(() => setLoading(false));
   }, [load]);
+
+  useEffect(() => {
+    if (!state || restoredSettingsRef.current || restoringSettingsRef.current) return;
+    const cached = cachedSnapshotRef.current;
+    if (!cached) return;
+
+    const cachedCoaches = Array.isArray(cached.coaches) ? cached.coaches.filter((c) => String(c?.name || "").trim()) : [];
+    const cachedLogos = cached.teamLogos && typeof cached.teamLogos === "object" ? cached.teamLogos : {};
+    const cachedLogoEntries = Object.entries(cachedLogos).filter(([, v]) => typeof v === "string" && v.trim());
+
+    const serverCoaches = Array.isArray(state.coaches) ? state.coaches.filter((c) => String(c?.name || "").trim()) : [];
+    const serverLogos = state.teamLogos && typeof state.teamLogos === "object" ? state.teamLogos : {};
+    const serverLogoCount = Object.keys(serverLogos).length;
+
+    const serverCoachNames = serverCoaches.map((c) => c.name);
+    const serverIsDefaultCoaches =
+      serverCoachNames.length === DEFAULT_COACH_NAMES.length &&
+      DEFAULT_COACH_NAMES.every((n, i) => serverCoachNames[i] === n);
+
+    const shouldRestoreCoaches = cachedCoaches.length > 0 && (serverCoaches.length === 0 || serverIsDefaultCoaches);
+    const shouldRestoreLogos = cachedLogoEntries.length > 0 && serverLogoCount === 0;
+
+    if (!shouldRestoreCoaches && !shouldRestoreLogos) {
+      restoredSettingsRef.current = true;
+      return;
+    }
+
+    restoringSettingsRef.current = true;
+    (async () => {
+      try {
+        if (shouldRestoreCoaches) {
+          await api("/api/settings/coaches", { method: "PUT", body: { coaches: cachedCoaches } });
+        }
+        if (shouldRestoreLogos) {
+          for (const [team, logoDataUrl] of cachedLogoEntries) {
+            await api("/api/team-logos", { method: "PUT", body: { team, logoDataUrl } });
+          }
+        }
+        await load({ silent: true });
+        setSyncMsg("Inställningar återställda från lokal cache.");
+      } catch {
+        // Låt appen fungera vidare även om återställning misslyckas.
+      } finally {
+        restoringSettingsRef.current = false;
+        restoredSettingsRef.current = true;
+      }
+    })();
+  }, [state, load]);
 
   useEffect(() => {
     const onFocus = () => {

@@ -3,6 +3,7 @@ import cors from "cors";
 import fs from "fs";
 import path from "path";
 import { fileURLToPath } from "url";
+import { Pool } from "pg";
 import {
   repairGroups2015IfNeeded,
   repairGroups2016IfNeeded,
@@ -29,6 +30,9 @@ const SEED_PATH = path.join(__dirname, "data.seed.json");
 const MATCH_COUNT = 13;
 const MAX_2015 = 3;
 const COACH_NAMES = ["Jonas", "Per", "Anders", "Kim"];
+const DATABASE_URL = process.env.DATABASE_URL || "";
+const NODE_ENV = process.env.NODE_ENV || "development";
+const FILE_FALLBACK_ENABLED = NODE_ENV !== "production";
 const DEFAULT_MINFOTBOLL_ICS_URL =
   process.env.MINFOTBOLL_ICS_URL ||
   "https://minfotboll-api.azurewebsites.net/api/ExternalCalendarAPI/GetMemberCalendar/dmJFMkpKuMBlDjjZjRJNMKsxWnquLwbT.ics";
@@ -207,6 +211,162 @@ function normalizeTeamKey(name) {
     .toLowerCase()
     .replace(/[^a-z0-9]+/g, "-")
     .replace(/^-+|-+$/g, "");
+}
+
+function isDefaultCoachSet(list) {
+  if (!Array.isArray(list) || list.length !== COACH_NAMES.length) return false;
+  for (let i = 0; i < COACH_NAMES.length; i++) {
+    if (String(list[i]?.name || list[i] || "").trim() !== COACH_NAMES[i]) return false;
+  }
+  return true;
+}
+
+function normalizedSettingsPayload(state) {
+  const coaches =
+    Array.isArray(state?.coaches) && state.coaches.length
+      ? state.coaches
+          .map((c, i) => ({
+            id: c?.id ? String(c.id) : `coach-${i + 1}`,
+            name: String(c?.name || "").trim(),
+            phone: String(c?.phone || "").trim(),
+            role: String(c?.role || "").trim(),
+            note: String(c?.note || "").trim(),
+          }))
+          .filter((c) => c.name)
+      : defaultCoaches();
+  const logos = {};
+  const src = state?.teamLogos && typeof state.teamLogos === "object" ? state.teamLogos : {};
+  for (const [k, v] of Object.entries(src)) {
+    if (typeof v !== "string" || !v.trim()) continue;
+    const nk = normalizeTeamKey(k);
+    if (!nk) continue;
+    logos[nk] = v;
+  }
+  return { coaches, teamLogos: logos, updatedAt: new Date().toISOString() };
+}
+
+const settingsPool = DATABASE_URL ? new Pool({ connectionString: DATABASE_URL }) : null;
+let remoteSettingsCache = null;
+let remoteSettingsReady = false;
+let remoteStateCache = null;
+let remoteStateReady = false;
+
+function isPlaceholderPlayerName(name) {
+  return /^Spelare 201[56]–\d+$/.test(String(name || "").trim());
+}
+
+function shouldRestoreFromRemoteState(state) {
+  if (!remoteStateReady || !remoteStateCache) return false;
+  const localPlayers = Array.isArray(state.players) ? state.players : [];
+  const localMatches = Array.isArray(state.matches) ? state.matches : [];
+  const localLogos = state.teamLogos && typeof state.teamLogos === "object" ? state.teamLogos : {};
+  const localCoaches = Array.isArray(state.coaches) ? state.coaches : [];
+  if (localPlayers.length === 0 || localMatches.length === 0) return true;
+  const allPlaceholder = localPlayers.length > 0 && localPlayers.every((p) => isPlaceholderPlayerName(p?.name));
+  const noLogos = Object.keys(localLogos).length === 0;
+  const defaultCoaches = localCoaches.length === 0 || isDefaultCoachSet(localCoaches);
+  return allPlaceholder && noLogos && defaultCoaches;
+}
+
+async function ensureSettingsTable() {
+  if (!settingsPool) throw new Error("DATABASE_URL mangler");
+  await settingsPool.query(`
+    CREATE TABLE IF NOT EXISTS app_settings (
+      id TEXT PRIMARY KEY,
+      payload JSONB NOT NULL,
+      updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    )
+  `);
+}
+
+async function loadRemoteSettings() {
+  if (!settingsPool) throw new Error("DATABASE_URL mangler");
+  await ensureSettingsTable();
+  const r = await settingsPool.query("SELECT payload FROM app_settings WHERE id = 'main' LIMIT 1");
+  remoteSettingsCache = r.rows[0]?.payload || null;
+  remoteSettingsReady = true;
+}
+
+async function persistRemoteSettings(state) {
+  if (!settingsPool) return;
+  const payload = normalizedSettingsPayload(state);
+  remoteSettingsCache = payload;
+  try {
+    await ensureSettingsTable();
+    await settingsPool.query(
+      `INSERT INTO app_settings (id, payload, updated_at)
+       VALUES ('main', $1::jsonb, NOW())
+       ON CONFLICT (id) DO UPDATE SET payload = EXCLUDED.payload, updated_at = NOW()`,
+      [JSON.stringify(payload)],
+    );
+  } catch (e) {
+    console.warn("Neon settings persist failed:", e.message);
+  }
+}
+
+async function ensureStateTable() {
+  if (!settingsPool) throw new Error("DATABASE_URL mangler");
+  await settingsPool.query(`
+    CREATE TABLE IF NOT EXISTS app_state (
+      id TEXT PRIMARY KEY,
+      payload JSONB NOT NULL,
+      updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    )
+  `);
+}
+
+async function loadRemoteState() {
+  if (!settingsPool) throw new Error("DATABASE_URL mangler");
+  await ensureStateTable();
+  const r = await settingsPool.query("SELECT payload FROM app_state WHERE id = 'main' LIMIT 1");
+  remoteStateCache = r.rows[0]?.payload || null;
+  remoteStateReady = true;
+}
+
+async function persistRemoteState(state) {
+  if (!settingsPool) return;
+  try {
+    await ensureStateTable();
+    await settingsPool.query(
+      `INSERT INTO app_state (id, payload, updated_at)
+       VALUES ('main', $1::jsonb, NOW())
+       ON CONFLICT (id) DO UPDATE SET payload = EXCLUDED.payload, updated_at = NOW()`,
+      [JSON.stringify(state)],
+    );
+    remoteStateCache = JSON.parse(JSON.stringify(state));
+  } catch (e) {
+    console.warn("Neon state persist failed:", e.message);
+  }
+}
+
+function applyRemoteSettingsIfNeeded(state) {
+  if (!remoteSettingsReady || !remoteSettingsCache) return false;
+  const incomingCoaches = Array.isArray(remoteSettingsCache.coaches) ? remoteSettingsCache.coaches : [];
+  const incomingLogos =
+    remoteSettingsCache.teamLogos && typeof remoteSettingsCache.teamLogos === "object"
+      ? remoteSettingsCache.teamLogos
+      : {};
+  const stateCoaches = Array.isArray(state.coaches) ? state.coaches : [];
+  const stateLogos = state.teamLogos && typeof state.teamLogos === "object" ? state.teamLogos : {};
+  const shouldRestoreCoaches = incomingCoaches.length > 0 && (stateCoaches.length === 0 || isDefaultCoachSet(stateCoaches));
+  const shouldRestoreLogos = Object.keys(incomingLogos).length > 0 && Object.keys(stateLogos).length === 0;
+  let dirty = false;
+  if (shouldRestoreCoaches) {
+    state.coaches = incomingCoaches.map((c, i) => ({
+      id: c?.id ? String(c.id) : `coach-${i + 1}`,
+      name: String(c?.name || "").trim(),
+      phone: String(c?.phone || "").trim(),
+      role: String(c?.role || "").trim(),
+      note: String(c?.note || "").trim(),
+    }));
+    state.coachNames = state.coaches.map((c) => c.name);
+    dirty = true;
+  }
+  if (shouldRestoreLogos) {
+    state.teamLogos = { ...incomingLogos };
+    dirty = true;
+  }
+  return dirty;
 }
 
 function sameSortedIdSets(a, b) {
@@ -541,27 +701,52 @@ function migrateStateShape(data) {
   return dirty;
 }
 
-function readState() {
-  try {
-    const raw = fs.readFileSync(DATA_PATH, "utf8");
-    const data = JSON.parse(raw);
-    if (!data.players?.length || !data.matches?.length) return defaultState();
-    let dirty = migrateStateShape(data);
-    if (ensureMeta(data)) dirty = true;
-    if (migrateAvailability(data)) dirty = true;
-    if (repairGroups2015IfNeeded(data)) dirty = true;
-    if (repairGroups2016IfNeeded(data)) dirty = true;
-    if (stripLegacyP10SquadsIfNeeded(data)) dirty = true;
-    if (ensureMinimumScheduleFromSeed(data)) dirty = true;
-    if (reconcilePlayerStats(data)) dirty = true;
-    if (backfillIntendedGroups2015(data)) dirty = true;
-    if (dirty) writeState(data);
-    return data;
-  } catch {
-    const s = defaultState();
-    writeState(s);
-    return s;
+async function readState() {
+  let data = null;
+  let bootstrappedFromFallback = false;
+  if (settingsPool) {
+    try {
+      await ensureStateTable();
+      const r = await settingsPool.query("SELECT payload FROM app_state WHERE id = 'main' LIMIT 1");
+      if (r.rows[0]?.payload) data = r.rows[0].payload;
+    } catch (e) {
+      console.warn("Neon state read failed:", e.message);
+    }
   }
+
+  if (!data && FILE_FALLBACK_ENABLED) {
+    try {
+      const raw = fs.readFileSync(DATA_PATH, "utf8");
+      data = JSON.parse(raw);
+    } catch {
+      data = defaultState();
+    }
+    bootstrappedFromFallback = Boolean(settingsPool);
+  }
+
+  if (shouldRestoreFromRemoteState(data)) {
+    data = JSON.parse(JSON.stringify(remoteStateCache));
+  }
+  if (!data.players?.length || !data.matches?.length) {
+    if (remoteStateCache) {
+      data = JSON.parse(JSON.stringify(remoteStateCache));
+    } else {
+      data = defaultState();
+    }
+    bootstrappedFromFallback = bootstrappedFromFallback || Boolean(settingsPool);
+  }
+  let dirty = migrateStateShape(data);
+  if (ensureMeta(data)) dirty = true;
+  if (migrateAvailability(data)) dirty = true;
+  if (repairGroups2015IfNeeded(data)) dirty = true;
+  if (repairGroups2016IfNeeded(data)) dirty = true;
+  if (stripLegacyP10SquadsIfNeeded(data)) dirty = true;
+  if (ensureMinimumScheduleFromSeed(data)) dirty = true;
+  if (applyRemoteSettingsIfNeeded(data)) dirty = true;
+  if (reconcilePlayerStats(data)) dirty = true;
+  if (backfillIntendedGroups2015(data)) dirty = true;
+  if (dirty || bootstrappedFromFallback) await writeState(data);
+  return data;
 }
 
 function normalizeImportedState(raw) {
@@ -590,7 +775,7 @@ function syncMatchShape(state) {
   }
 }
 
-function writeState(state) {
+async function writeState(state) {
   if (!state.meta || typeof state.meta !== "object") {
     state.meta = { revision: 1, updatedAt: new Date().toISOString() };
   }
@@ -602,7 +787,11 @@ function writeState(state) {
     .filter((m) => m.branch === "p11" && m.fixture)
     .sort(compareMatchesChronologically);
   state.fixturesP11 = p11Rows.map((m) => JSON.parse(JSON.stringify(m.fixture)));
-  fs.writeFileSync(DATA_PATH, JSON.stringify(state, null, 2), "utf8");
+  if (FILE_FALLBACK_ENABLED) {
+    fs.writeFileSync(DATA_PATH, JSON.stringify(state, null, 2), "utf8");
+  }
+  await persistRemoteState(state);
+  await persistRemoteSettings(state);
 }
 
 function jsonState(state) {
@@ -633,18 +822,46 @@ const app = express();
 app.use(cors());
 app.use(express.json({ limit: "10mb" }));
 
-const isProd = process.env.NODE_ENV === "production";
+const isProd = NODE_ENV === "production";
 if (isProd) {
   app.use(express.static(path.join(__dirname, "dist")));
 }
 
-app.get("/api/state", (_req, res) => {
-  res.json(jsonState(readState()));
+app.get("/api/health/db", async (_req, res) => {
+  try {
+    if (!settingsPool) {
+      return res.status(500).json({
+        ok: false,
+        db: "missing_database_url",
+        message: "DATABASE_URL saknas",
+      });
+    }
+    const r = await settingsPool.query("SELECT NOW() AS now");
+    return res.json({
+      ok: true,
+      db: "connected",
+      now: r.rows[0]?.now || null,
+      env: NODE_ENV,
+      fileFallback: FILE_FALLBACK_ENABLED,
+    });
+  } catch (e) {
+    return res.status(500).json({
+      ok: false,
+      db: "error",
+      message: e.message,
+      env: NODE_ENV,
+      fileFallback: FILE_FALLBACK_ENABLED,
+    });
+  }
+});
+
+app.get("/api/state", async (_req, res) => {
+  res.json(jsonState(await readState()));
 });
 
 app.post("/api/fixtures/sync-ics", async (req, res) => {
   try {
-    const state = readState();
+    const state = await readState();
     const url = normalizeIcsUrl(req.body?.url);
     const response = await fetch(url);
     if (!response.ok) {
@@ -656,7 +873,7 @@ app.post("/api/fixtures/sync-ics", async (req, res) => {
       return res.status(400).json({ error: "Inga matcher hittades i ICS-flödet." });
     }
     const result = syncFixturesFromIcs(state, fixtures);
-    writeState(state);
+    await writeState(state);
     return res.json({
       ...jsonState(state),
       sync: {
@@ -671,19 +888,19 @@ app.post("/api/fixtures/sync-ics", async (req, res) => {
   }
 });
 
-app.get("/api/simulate-season", (_req, res) => {
+app.get("/api/simulate-season", async (_req, res) => {
   try {
-    const s = readState();
+    const s = await readState();
     res.json(simulateFullSeason(s));
   } catch (e) {
     res.status(500).json({ error: e.message });
   }
 });
 
-app.post("/api/state/import", (req, res) => {
+app.post("/api/state/import", async (req, res) => {
   try {
     const state = normalizeImportedState(req.body);
-    writeState(state);
+    await writeState(state);
     res.json(jsonState(state));
   } catch (e) {
     if (e.message === "invalid_backup") {
@@ -699,8 +916,8 @@ app.post("/api/state/import", (req, res) => {
   }
 });
 
-app.put("/api/settings/coaches", (req, res) => {
-  const state = readState();
+app.put("/api/settings/coaches", async (req, res) => {
+  const state = await readState();
   const incoming = Array.isArray(req.body?.coaches)
     ? req.body.coaches
     : Array.isArray(req.body?.coachNames)
@@ -722,12 +939,12 @@ app.put("/api/settings/coaches", (req, res) => {
   if (!coaches.length) return res.status(400).json({ error: "Ange minst en tränare." });
   state.coaches = coaches.slice(0, 20);
   state.coachNames = state.coaches.map((c) => c.name);
-  writeState(state);
+  await writeState(state);
   res.json(jsonState(state));
 });
 
-app.put("/api/team-logos", (req, res) => {
-  const state = readState();
+app.put("/api/team-logos", async (req, res) => {
+  const state = await readState();
   const team = String(req.body?.team || "").trim();
   const teamKey = normalizeTeamKey(team);
   const logoDataUrl = req.body?.logoDataUrl;
@@ -736,7 +953,7 @@ app.put("/api/team-logos", (req, res) => {
   if (logoDataUrl === null) {
     delete state.teamLogos[team];
     delete state.teamLogos[teamKey];
-    writeState(state);
+    await writeState(state);
     return res.json(jsonState(state));
   }
   const value = String(logoDataUrl || "").trim();
@@ -744,13 +961,13 @@ app.put("/api/team-logos", (req, res) => {
     return res.status(400).json({ error: "Ogiltig bild. Ladda upp PNG/JPG/WebP/GIF/SVG." });
   }
   state.teamLogos[teamKey] = value;
-  writeState(state);
+  await writeState(state);
   res.json(jsonState(state));
 });
 
 /** Spara fasta 2015-grupper (exakt tre spelare per grupp A/B/C, alla nio täckta). */
-app.put("/api/groups2015", (req, res) => {
-  const state = readState();
+app.put("/api/groups2015", async (req, res) => {
+  const state = await readState();
   const { A, B, C } = req.body || {};
   if (!Array.isArray(A) || !Array.isArray(B) || !Array.isArray(C)) {
     return res.status(400).json({ error: "Ogiltigt format (A, B, C som listor)." });
@@ -762,17 +979,17 @@ app.put("/api/groups2015", (req, res) => {
     });
   }
   state.groups2015 = { A: [...A], B: [...B], C: [...C] };
-  writeState(state);
+  await writeState(state);
   res.json(jsonState(state));
 });
 
-app.post("/api/players", (req, res) => {
+app.post("/api/players", async (req, res) => {
   const { name, birthYear } = req.body;
   const year = Number(birthYear);
   if (!name || (year !== 2015 && year !== 2016)) {
     return res.status(400).json({ error: "Ogiltig spelare" });
   }
-  const state = readState();
+  const state = await readState();
   const id = `p-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
   state.players.push({
     id,
@@ -784,13 +1001,13 @@ app.post("/api/players", (req, res) => {
   });
   repairGroups2015IfNeeded(state);
   repairGroups2016IfNeeded(state);
-  writeState(state);
+  await writeState(state);
   res.json(jsonState(state));
 });
 
 /** Spara fasta 2016-grupper (tre per A/B/C vid minst nio 2016-spelare; övriga i extra-listan). */
-app.put("/api/groups2016", (req, res) => {
-  const state = readState();
+app.put("/api/groups2016", async (req, res) => {
+  const state = await readState();
   const { A, B, C, extra } = req.body || {};
   if (!Array.isArray(A) || !Array.isArray(B) || !Array.isArray(C)) {
     return res.status(400).json({ error: "Ogiltigt format (A, B, C som listor)." });
@@ -808,12 +1025,12 @@ app.put("/api/groups2016", (req, res) => {
   }
   state.groups2016 = { A: [...A], B: [...B], C: [...C] };
   state.groups2016Extra = extraList;
-  writeState(state);
+  await writeState(state);
   res.json(jsonState(state));
 });
 
-app.put("/api/matches/:id/fixture", (req, res) => {
-  const state = readState();
+app.put("/api/matches/:id/fixture", async (req, res) => {
+  const state = await readState();
   const match = state.matches.find((m) => m.id === req.params.id);
   if (!match) return res.status(404).json({ error: "Match hittades inte" });
   const body = req.body || {};
@@ -839,12 +1056,12 @@ app.put("/api/matches/:id/fixture", (req, res) => {
       match.fixture[key] = body[key];
     }
   }
-  writeState(state);
+  await writeState(state);
   res.json(jsonState(state));
 });
 
-app.put("/api/players/:id", (req, res) => {
-  const state = readState();
+app.put("/api/players/:id", async (req, res) => {
+  const state = await readState();
   const p = state.players.find((x) => x.id === req.params.id);
   if (!p) return res.status(404).json({ error: "Hittades inte" });
   const { name, birthYear, available } = req.body;
@@ -859,31 +1076,31 @@ app.put("/api/players/:id", (req, res) => {
   }
   repairGroups2015IfNeeded(state);
   repairGroups2016IfNeeded(state);
-  writeState(state);
+  await writeState(state);
   res.json(jsonState(state));
 });
 
-app.delete("/api/players/:id", (req, res) => {
-  const state = readState();
+app.delete("/api/players/:id", async (req, res) => {
+  const state = await readState();
   state.players = state.players.filter((x) => x.id !== req.params.id);
   for (const m of state.matches) {
     m.selectedPlayerIds = m.selectedPlayerIds.filter((id) => id !== req.params.id);
   }
   repairGroups2015IfNeeded(state);
   repairGroups2016IfNeeded(state);
-  writeState(state);
+  await writeState(state);
   res.json(jsonState(state));
 });
 
-app.post("/api/matches/:id/select", (req, res) => {
+app.post("/api/matches/:id/select", async (req, res) => {
   try {
-    const state = readState();
+    const state = await readState();
     selectTeamForMatch(state, req.params.id, {
       override2015PlayerIds: req.body?.override2015PlayerIds,
       override2016PlayerIds: req.body?.override2016PlayerIds,
       rng: Math.random,
     });
-    writeState(state);
+    await writeState(state);
     res.json(jsonState(state));
   } catch (e) {
     if (e.message === "match_already_played") return res.status(400).json({ error: "Matchen är redan spelad" });
@@ -932,8 +1149,8 @@ app.post("/api/matches/:id/select", (req, res) => {
   }
 });
 
-app.post("/api/matches/:id/complete", (req, res) => {
-  const state = readState();
+app.post("/api/matches/:id/complete", async (req, res) => {
+  const state = await readState();
   const match = state.matches.find((m) => m.id === req.params.id);
   if (!match) return res.status(404).json({ error: "Match hittades inte" });
   if (match.status === "played") return res.status(400).json({ error: "Redan markerad som genomförd" });
@@ -1009,13 +1226,13 @@ app.post("/api/matches/:id/complete", (req, res) => {
 
   match.status = "played";
   reconcilePlayerStats(state);
-  writeState(state);
+  await writeState(state);
   res.json(jsonState(state));
 });
 
 /** Ångra match — tar bort genomförd status, återställer rotation utifrån kvarvarande matcher, uppdaterar statistik. */
-app.post("/api/matches/:id/reopen", (req, res) => {
-  const state = readState();
+app.post("/api/matches/:id/reopen", async (req, res) => {
+  const state = await readState();
   const match = state.matches.find((m) => m.id === req.params.id);
   if (!match) return res.status(404).json({ error: "Match hittades inte" });
   if (match.status !== "played") return res.status(400).json({ error: "Matchen är inte genomförd" });
@@ -1024,12 +1241,12 @@ app.post("/api/matches/:id/reopen", (req, res) => {
   match.intendedGroup2016 = null;
   match.selectionExplanation = null;
   reconcilePlayerStats(state);
-  writeState(state);
+  await writeState(state);
   res.json(jsonState(state));
 });
 
-app.post("/api/matches/:id/comments", (req, res) => {
-  const state = readState();
+app.post("/api/matches/:id/comments", async (req, res) => {
+  const state = await readState();
   const match = state.matches.find((m) => m.id === req.params.id);
   if (!match) return res.status(404).json({ error: "Match hittades inte" });
   const name = String(req.body?.name || "").trim();
@@ -1048,23 +1265,23 @@ app.post("/api/matches/:id/comments", (req, res) => {
     text,
     timestamp: new Date().toISOString(),
   });
-  writeState(state);
+  await writeState(state);
   res.json(jsonState(state));
 });
 
-app.put("/api/matches/:id/note", (req, res) => {
-  const state = readState();
+app.put("/api/matches/:id/note", async (req, res) => {
+  const state = await readState();
   const match = state.matches.find((m) => m.id === req.params.id);
   if (!match) return res.status(404).json({ error: "Match hittades inte" });
   const note = String(req.body?.note || "").trim();
   match.note = note.slice(0, 500);
-  writeState(state);
+  await writeState(state);
   res.json(jsonState(state));
 });
 
 /** Nollställ säsong: matcher, räknare, tillgänglighet; behåller spelare och giltiga 2015-grupper. */
-app.post("/api/reset-season", (_req, res) => {
-  const state = readState();
+app.post("/api/reset-season", async (_req, res) => {
+  const state = await readState();
   for (const p of state.players) {
     p.matchesPlayed = 0;
     p.lastPlayedMatchNumber = null;
@@ -1079,7 +1296,7 @@ app.post("/api/reset-season", (_req, res) => {
   }
   repairGroups2015IfNeeded(state);
   repairGroups2016IfNeeded(state);
-  writeState(state);
+  await writeState(state);
   res.json(jsonState(state));
 });
 
@@ -1090,6 +1307,26 @@ if (isProd) {
 }
 
 const PORT = Number(process.env.PORT) || 37831;
-app.listen(PORT, () => {
-  console.log(`API lyssnar på http://localhost:${PORT}`);
-});
+async function startServer() {
+  if (isProd && !settingsPool) {
+    console.error("DATABASE_URL mangler i production. Stoppar server.");
+    process.exit(1);
+  }
+  try {
+    await loadRemoteState();
+  } catch (e) {
+    console.warn("Neon state init failed:", e.message);
+    remoteStateReady = true;
+  }
+  try {
+    await loadRemoteSettings();
+  } catch (e) {
+    console.warn("Neon settings init failed:", e.message);
+    remoteSettingsReady = true;
+  }
+  app.listen(PORT, () => {
+    console.log(`API lyssnar på http://localhost:${PORT}`);
+  });
+}
+
+startServer();
