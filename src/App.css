@@ -8,6 +8,7 @@
 
 html {
   -webkit-text-size-adjust: 100%;
+  overflow-x: hidden;
 }
 
 body {
@@ -19,10 +20,12 @@ body {
   background: linear-gradient(180deg, #f9fafc 0%, var(--bg) 28%);
   min-height: 100dvh;
   -webkit-font-smoothing: antialiased;
+  overflow-x: hidden;
 }
 
 #root {
   min-height: 100dvh;
+  overflow-x: hidden;
 }
 
 .app {
@@ -32,6 +35,7 @@ body {
   padding: calc(var(--space) + env(safe-area-inset-top)) calc(var(--space) + env(safe-area-inset-right))
     calc(var(--space-lg) + env(safe-area-inset-bottom)) calc(var(--space) + env(safe-area-inset-left));
   padding-bottom: max(24px, env(safe-area-inset-bottom));
+  overflow-x: clip;
 }
 
 .app-header {
@@ -116,6 +120,9 @@ body {
   touch-action: manipulation;
   -webkit-tap-highlight-color: transparent;
   transition: background 0.16s ease, color 0.16s ease, box-shadow 0.16s ease;
+  white-space: normal;
+  word-break: break-word;
+  line-height: 1.2;
 }
 
 .segmented__btn[aria-selected="true"] {
@@ -159,7 +166,7 @@ body {
 /* Underflikar inom t.ex. Spelargrupp */
 .segmented--nested {
   margin: 12px 0 20px;
-  max-width: min(100%, 400px);
+  max-width: 100%;
 }
 
 /* Panel */
@@ -262,6 +269,7 @@ body {
 
 .match-card__inner {
   padding: 16px 18px 18px;
+  min-width: 0;
 }
 
 .match-card__head {
@@ -277,6 +285,7 @@ body {
   font-weight: 700;
   margin: 0;
   letter-spacing: -0.02em;
+  overflow-wrap: anywhere;
 }
 
 .badge {
@@ -374,6 +383,7 @@ body {
   color: var(--text-secondary);
   text-transform: uppercase;
   letter-spacing: 0.02em;
+  overflow-wrap: anywhere;
 }
 
 .field__input,
@@ -987,6 +997,12 @@ body {
   width: 100%;
 }
 
+.lineup-formation-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 8px;
+}
+
 /* Laddning / tomt */
 .app-state {
   display: flex;
@@ -1258,8 +1274,9 @@ body {
   left: 50%;
   top: 50%;
   transform: translate(-50%, -50%);
-  min-width: 72px;
-  max-width: 140px;
+  min-width: 0;
+  width: min(140px, 42vw);
+  max-width: min(140px, 42vw);
   border: 1px solid rgb(255 255 255 / 0.7);
   border-radius: 999px;
   background: rgb(255 255 255 / 0.18);
@@ -1297,6 +1314,7 @@ body {
   -webkit-line-clamp: 2;
   -webkit-box-orient: vertical;
   overflow: hidden;
+  overflow-wrap: anywhere;
 }
 
 .lineup-pitch__slot {
@@ -1427,6 +1445,7 @@ body {
   gap: 2px;
   cursor: pointer;
   transition: transform 0.12s ease, box-shadow 0.12s ease, border-color 0.12s ease, filter 0.12s ease;
+  min-width: 0;
 }
 
 .calendar-event:hover {
@@ -1456,9 +1475,11 @@ body {
 .calendar-event__top {
   display: flex;
   align-items: center;
+  flex-wrap: wrap;
   gap: 5px;
   font-size: 11px;
   color: var(--foreground);
+  min-width: 0;
 }
 
 .calendar-event__update {
@@ -1480,6 +1501,7 @@ body {
   word-break: break-word;
   display: inline-flex;
   align-items: center;
+  flex-wrap: wrap;
   gap: 6px;
 }
 
@@ -1489,8 +1511,10 @@ body {
   line-height: 1.2;
   display: flex;
   align-items: center;
-  justify-content: space-between;
+  justify-content: flex-start;
+  flex-wrap: wrap;
   gap: 8px;
+  min-width: 0;
 }
 
 .calendar-event__hint {
@@ -1593,6 +1617,7 @@ body {
   border-radius: 10px;
   padding: 8px 10px;
   background: color-mix(in oklab, white 88%, var(--bg-elevated));
+  overflow-wrap: anywhere;
 }
 
 .match-availability {
@@ -1794,6 +1819,14 @@ body {
     padding: 14px 14px 16px;
   }
 
+  .match-card__headrow {
+    align-items: flex-start;
+  }
+
+  .match-card__headrow > div {
+    min-width: 0;
+  }
+
   .btn {
     min-height: 46px;
     font-size: 16px;
@@ -1877,7 +1910,12 @@ body {
   }
 
   .lineup-pitch__player {
-    max-width: 124px;
+    width: min(124px, 44vw);
+    max-width: min(124px, 44vw);
+  }
+
+  .lineup-formation-grid {
+    gap: 6px;
   }
 
   .logo-manager__row {
@@ -1892,6 +1930,31 @@ body {
 
   .calendar-day {
     min-height: 86px;
+  }
+
+  .match-toolbar__item {
+    white-space: normal;
+  }
+
+  .fixture-block__row {
+    grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr);
+  }
+
+  .fixture-block__center {
+    min-width: 72px;
+  }
+
+  .fixture-block__club,
+  .fixture-block__venue {
+    max-width: 100%;
+  }
+
+  .fixture-block__time {
+    font-size: 20px;
+  }
+
+  .lineup-formation-grid {
+    grid-template-columns: 1fr;
   }
 
   .calendar-event__top {

@@ -837,7 +837,7 @@ function MatchCard({
           <div className="form-add" style={{ marginBottom: 10 }}>
             <div className="field">
               <span className="field__label">Formation (F-M-A)</span>
-              <div style={{ display: "flex", gap: 8 }}>
+              <div className="lineup-formation-grid">
                 <input
                   className="field__select"
                   type="number"
