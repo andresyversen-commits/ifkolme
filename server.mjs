@@ -380,6 +380,8 @@ function initialPlayers() {
     id: `p2015-${i + 1}`,
     name: `Spelare 2015–${i + 1}`,
     birthYear: 2015,
+    jerseyNumber: null,
+    preferredPosition: "",
     matchesPlayed: 0,
     lastPlayedMatchNumber: null,
     available: true,
@@ -388,6 +390,8 @@ function initialPlayers() {
     id: `p2016-${i + 1}`,
     name: `Spelare 2016–${i + 1}`,
     birthYear: 2016,
+    jerseyNumber: null,
+    preferredPosition: "",
     matchesPlayed: 0,
     lastPlayedMatchNumber: null,
     available: true,
@@ -410,6 +414,7 @@ function initialMatches() {
     selectionExplanation: null,
     comments: [],
     note: "",
+    lineup: null,
     fixture: null,
   }));
 }
@@ -510,8 +515,47 @@ function migrateAvailability(data) {
       p.available = true;
       dirty = true;
     }
+    if (p.jerseyNumber === undefined) {
+      p.jerseyNumber = null;
+      dirty = true;
+    }
+    if (typeof p.preferredPosition !== "string") {
+      p.preferredPosition = "";
+      dirty = true;
+    }
   }
   return dirty;
+}
+
+function normalizeLineup(raw) {
+  const src = raw && typeof raw === "object" ? raw : {};
+  const formationRaw = src.formation && typeof src.formation === "object" ? src.formation : {};
+  const defenders = Math.max(1, Math.min(5, Math.floor(Number(formationRaw.defenders || 2))));
+  const midfielders = Math.max(0, Math.min(5, Math.floor(Number(formationRaw.midfielders || 2))));
+  const attackers = Math.max(0, Math.min(5, Math.floor(Number(formationRaw.attackers || 2))));
+  const formation = { defenders, midfielders, attackers };
+  const side = src.side === "höger" ? "höger" : "vänster";
+  const starters = Array.isArray(src.starters)
+    ? src.starters
+        .map((row) => ({
+          playerId: String(row?.playerId || "").trim(),
+          role: String(row?.role || "").trim(),
+          lane: String(row?.lane || "").trim() || "central",
+          order: Number.isFinite(Number(row?.order)) ? Math.max(1, Math.floor(Number(row.order))) : 1,
+        }))
+        .filter((row) => row.playerId && row.role)
+    : [];
+  const substitutions = Array.isArray(src.substitutions)
+    ? src.substitutions
+        .map((row) => ({
+          order: Number.isFinite(Number(row?.order)) ? Math.max(1, Math.floor(Number(row.order))) : 1,
+          outPlayerId: String(row?.outPlayerId || "").trim(),
+          inPlayerId: String(row?.inPlayerId || "").trim(),
+          note: String(row?.note || "").trim(),
+        }))
+        .filter((row) => row.outPlayerId || row.inPlayerId || row.note)
+    : [];
+  return { formation, side, starters, substitutions };
 }
 
 function reconcilePlayerStats(state) {
@@ -583,6 +627,16 @@ function migrateStateShape(data) {
     if (typeof m.note !== "string") {
       m.note = "";
       dirty = true;
+    }
+    if (m.lineup === undefined) {
+      m.lineup = null;
+      dirty = true;
+    } else if (m.lineup) {
+      const norm = normalizeLineup(m.lineup);
+      if (JSON.stringify(norm) !== JSON.stringify(m.lineup)) {
+        m.lineup = norm;
+        dirty = true;
+      }
     }
     if (m.fixture === undefined) {
       m.fixture = null;
@@ -984,7 +1038,7 @@ app.put("/api/groups2015", async (req, res) => {
 });
 
 app.post("/api/players", async (req, res) => {
-  const { name, birthYear } = req.body;
+  const { name, birthYear, jerseyNumber, preferredPosition } = req.body;
   const year = Number(birthYear);
   if (!name || (year !== 2015 && year !== 2016)) {
     return res.status(400).json({ error: "Ogiltig spelare" });
@@ -995,6 +1049,8 @@ app.post("/api/players", async (req, res) => {
     id,
     name: String(name).trim(),
     birthYear: year,
+    jerseyNumber: Number.isFinite(Number(jerseyNumber)) ? Math.max(1, Math.floor(Number(jerseyNumber))) : null,
+    preferredPosition: String(preferredPosition || "").trim().slice(0, 40),
     matchesPlayed: 0,
     lastPlayedMatchNumber: null,
     available: true,
@@ -1064,7 +1120,7 @@ app.put("/api/players/:id", async (req, res) => {
   const state = await readState();
   const p = state.players.find((x) => x.id === req.params.id);
   if (!p) return res.status(404).json({ error: "Hittades inte" });
-  const { name, birthYear, available } = req.body;
+  const { name, birthYear, available, jerseyNumber, preferredPosition } = req.body;
   if (name != null) p.name = String(name).trim();
   if (birthYear != null) {
     const y = Number(birthYear);
@@ -1074,8 +1130,50 @@ app.put("/api/players/:id", async (req, res) => {
   if (available !== undefined && available !== null) {
     p.available = Boolean(available);
   }
+  if (jerseyNumber !== undefined) {
+    p.jerseyNumber = Number.isFinite(Number(jerseyNumber)) ? Math.max(1, Math.floor(Number(jerseyNumber))) : null;
+  }
+  if (preferredPosition !== undefined) {
+    p.preferredPosition = String(preferredPosition || "").trim().slice(0, 40);
+  }
   repairGroups2015IfNeeded(state);
   repairGroups2016IfNeeded(state);
+  await writeState(state);
+  res.json(jsonState(state));
+});
+
+app.put("/api/matches/:id/lineup", async (req, res) => {
+  const state = await readState();
+  const match = state.matches.find((m) => m.id === req.params.id);
+  if (!match) return res.status(404).json({ error: "Match hittades inte" });
+  if (!Array.isArray(match.selectedPlayerIds) || match.selectedPlayerIds.length === 0) {
+    return res.status(400).json({ error: "Välj lag först innan startuppställning sparas." });
+  }
+  const lineup = normalizeLineup(req.body || {});
+  const pool = new Set(match.selectedPlayerIds);
+  for (const row of lineup.starters) {
+    if (!pool.has(row.playerId)) {
+      return res.status(400).json({ error: "Startelvan får bara innehålla valda spelare." });
+    }
+  }
+  const gkCount = lineup.starters.filter((row) => row.role === "goalkeeper").length;
+  const outfieldCount = lineup.starters.filter((row) => row.role !== "goalkeeper").length;
+  if (gkCount !== 1 || outfieldCount !== 6) {
+    return res.status(400).json({ error: "Startelvan måste ha exakt 1 målvakt och 6 utespelare." });
+  }
+  const unique = new Set(lineup.starters.map((row) => row.playerId));
+  if (unique.size !== lineup.starters.length) {
+    return res.status(400).json({ error: "En spelare kan bara ha en position i startelvan." });
+  }
+  for (const sub of lineup.substitutions) {
+    if (sub.outPlayerId && !pool.has(sub.outPlayerId)) {
+      return res.status(400).json({ error: "Byten: utgående spelare måste vara i matchtruppen." });
+    }
+    if (sub.inPlayerId && !pool.has(sub.inPlayerId)) {
+      return res.status(400).json({ error: "Byten: inbytt spelare måste vara i matchtruppen." });
+    }
+  }
+  match.lineup = lineup;
   await writeState(state);
   res.json(jsonState(state));
 });

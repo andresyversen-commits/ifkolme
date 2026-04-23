@@ -1148,6 +1148,176 @@ body {
   justify-self: end;
 }
 
+.lineup-pitch {
+  margin-top: 14px;
+}
+
+.lineup-dnd-help {
+  font-size: 13px;
+  color: var(--text-secondary);
+  margin-bottom: 8px;
+}
+
+.lineup-bench {
+  border: 1px dashed var(--separator-strong);
+  border-radius: 12px;
+  padding: 10px;
+  margin-bottom: 10px;
+  background: color-mix(in oklab, var(--fill-secondary) 72%, white);
+}
+
+.lineup-bench__title {
+  display: block;
+  font-size: 13px;
+  margin-bottom: 6px;
+}
+
+.lineup-bench__players {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.lineup-bench__chip {
+  border: 1px solid var(--separator);
+  background: var(--bg-elevated);
+  border-radius: 999px;
+  padding: 5px 10px;
+  font-size: 13px;
+}
+
+.lineup-pitch__surface {
+  position: relative;
+  height: 330px;
+  border-radius: 16px;
+  border: 1px solid color-mix(in oklab, #14532d 45%, white);
+  background:
+    linear-gradient(180deg, rgb(27 131 77 / 0.94) 0%, rgb(16 109 61 / 0.97) 100%),
+    repeating-linear-gradient(
+      0deg,
+      rgb(255 255 255 / 0.05) 0,
+      rgb(255 255 255 / 0.05) 24px,
+      transparent 24px,
+      transparent 48px
+    );
+  overflow: hidden;
+}
+
+.lineup-pitch__half {
+  position: absolute;
+  left: 10%;
+  right: 10%;
+  top: 50%;
+  height: 1px;
+  background: rgb(255 255 255 / 0.45);
+}
+
+.lineup-pitch__circle {
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  width: 62px;
+  height: 62px;
+  margin-left: -31px;
+  margin-top: -31px;
+  border: 1px solid rgb(255 255 255 / 0.5);
+  border-radius: 50%;
+}
+
+.lineup-pitch__box {
+  position: absolute;
+  left: 28%;
+  right: 28%;
+  height: 58px;
+  border: 1px solid rgb(255 255 255 / 0.5);
+}
+
+.lineup-pitch__box--top {
+  top: 0;
+  border-top: none;
+}
+
+.lineup-pitch__box--bottom {
+  bottom: 0;
+  border-bottom: none;
+}
+
+.lineup-pitch__player {
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  transform: translate(-50%, -50%);
+  min-width: 72px;
+  max-width: 118px;
+  border: 1px solid rgb(255 255 255 / 0.7);
+  border-radius: 999px;
+  background: rgb(255 255 255 / 0.18);
+  box-shadow: 0 8px 14px rgb(0 0 0 / 0.2);
+  color: #fff;
+  padding: 4px 8px;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  backdrop-filter: blur(4px);
+}
+
+.lineup-pitch__player--goalkeeper {
+  background: rgb(37 99 235 / 0.55);
+}
+
+.lineup-pitch__number {
+  font-size: 12px;
+  font-weight: 700;
+  min-width: 20px;
+  height: 20px;
+  border-radius: 50%;
+  background: rgb(0 0 0 / 0.36);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.lineup-pitch__name {
+  font-size: 11px;
+  font-weight: 600;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.lineup-pitch__slot {
+  position: absolute;
+  transform: translate(-50%, -50%);
+  width: 112px;
+  height: 34px;
+  border-radius: 999px;
+  border: 1px dashed rgb(255 255 255 / 0.45);
+  background: rgb(255 255 255 / 0.08);
+}
+
+.lineup-pitch__slot.is-filled {
+  border-style: solid;
+  background: transparent;
+}
+
+.lineup-pitch__empty {
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  transform: translate(-50%, -50%);
+  color: rgb(255 255 255 / 0.78);
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+  text-transform: uppercase;
+}
+
+.lineup-pitch__meta {
+  margin: 8px 0 0;
+  font-size: 13px;
+  color: var(--text-secondary);
+}
+
 .calendar-month-stack {
   display: grid;
   gap: 12px;
@@ -1672,6 +1842,14 @@ body {
   .lineup-list__availability-btn {
     grid-column: 1 / -1;
     justify-self: start;
+  }
+
+  .lineup-pitch__surface {
+    height: 300px;
+  }
+
+  .lineup-pitch__player {
+    max-width: 104px;
   }
 
   .logo-manager__row {

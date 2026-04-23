@@ -54,6 +54,41 @@ const LS_UI_KEY = "lagval.ui.v1";
 const DEFAULT_MINFOTBOLL_ICS_URL =
   "webcal://minfotboll-api.azurewebsites.net/api/ExternalCalendarAPI/GetMemberCalendar/dmJFMkpKuMBlDjjZjRJNMKsxWnquLwbT.ics";
 const DEFAULT_COACH_NAMES = ["Jonas", "Per", "Anders", "Kim"];
+const PLAYER_POSITIONS = ["Målvakt", "Försvarare", "Mittfältare", "Anfallare", "Allround"];
+
+function roleLabelSv(role) {
+  if (role === "goalkeeper") return "Målvakt";
+  if (role === "defender") return "Försvar";
+  if (role === "midfielder") return "Mittfält";
+  if (role === "attacker") return "Anfall";
+  return role || "—";
+}
+
+function lanePattern(count, side = "vänster") {
+  if (count <= 1) return ["central"];
+  if (count === 2) return side === "höger" ? ["central", "höger"] : ["vänster", "central"];
+  if (count === 3) return ["vänster", "central", "höger"];
+  if (count === 4) return ["vänster", "central", "central", "höger"];
+  return Array.from({ length: count }, (_, i) => {
+    if (i === 0) return "vänster";
+    if (i === count - 1) return "höger";
+    return "central";
+  });
+}
+
+function buildOutfieldSlots(formation, side = "vänster") {
+  const out = [];
+  const pushGroup = (role, n) => {
+    const lanes = lanePattern(n, side);
+    for (let i = 0; i < n; i++) {
+      out.push({ key: `${role}-${i + 1}`, role, lane: lanes[i], order: out.length + 1 });
+    }
+  };
+  pushGroup("defender", Number(formation?.defenders || 0));
+  pushGroup("midfielder", Number(formation?.midfielders || 0));
+  pushGroup("attacker", Number(formation?.attackers || 0));
+  return out;
+}
 
 function seasonYear() {
   return new Date().getFullYear();
@@ -522,6 +557,26 @@ function MatchCard({
   const [commentName, setCommentName] = useState(() => coachNames[0] || "Jonas");
   const [commentText, setCommentText] = useState("");
   const [noteDraft, setNoteDraft] = useState(m.note || "");
+  const [formationDraft, setFormationDraft] = useState(() => ({
+    defenders: Number(m.lineup?.formation?.defenders || 2),
+    midfielders: Number(m.lineup?.formation?.midfielders || 2),
+    attackers: Number(m.lineup?.formation?.attackers || 2),
+  }));
+  const [sideDraft, setSideDraft] = useState(() => (m.lineup?.side === "höger" ? "höger" : "vänster"));
+  const [keeperId, setKeeperId] = useState(() =>
+    m.lineup?.starters?.find((s) => s.role === "goalkeeper")?.playerId ? String(m.lineup.starters.find((s) => s.role === "goalkeeper").playerId) : "",
+  );
+  const [starterMap, setStarterMap] = useState({});
+  const [subsDraft, setSubsDraft] = useState(() =>
+    Array.isArray(m.lineup?.substitutions) && m.lineup.substitutions.length
+      ? m.lineup.substitutions.map((s, i) => ({
+          order: Number(s.order || i + 1),
+          outPlayerId: String(s.outPlayerId || ""),
+          inPlayerId: String(s.inPlayerId || ""),
+          note: String(s.note || ""),
+        }))
+      : [{ order: 1, outPlayerId: "", inPlayerId: "", note: "" }],
+  );
 
   useEffect(() => {
     setAssistDraft(String(m.fixture?.p11Assist2016 ?? 0));
@@ -529,6 +584,34 @@ function MatchCard({
   useEffect(() => {
     setNoteDraft(m.note || "");
   }, [m.note, m.id]);
+  useEffect(() => {
+    const formation = {
+      defenders: Number(m.lineup?.formation?.defenders || 2),
+      midfielders: Number(m.lineup?.formation?.midfielders || 2),
+      attackers: Number(m.lineup?.formation?.attackers || 2),
+    };
+    setFormationDraft(formation);
+    setSideDraft(m.lineup?.side === "höger" ? "höger" : "vänster");
+    const gk = m.lineup?.starters?.find((s) => s.role === "goalkeeper");
+    setKeeperId(gk?.playerId ? String(gk.playerId) : "");
+    const slotMap = {};
+    const slots = buildOutfieldSlots(formation, m.lineup?.side === "höger" ? "höger" : "vänster");
+    for (const slot of slots) {
+      const row = (m.lineup?.starters || []).find((s) => s.role === slot.role && Number(s.order) === slot.order);
+      slotMap[slot.key] = row?.playerId ? String(row.playerId) : "";
+    }
+    setStarterMap(slotMap);
+    setSubsDraft(
+      Array.isArray(m.lineup?.substitutions) && m.lineup.substitutions.length
+        ? m.lineup.substitutions.map((s, i) => ({
+            order: Number(s.order || i + 1),
+            outPlayerId: String(s.outPlayerId || ""),
+            inPlayerId: String(s.inPlayerId || ""),
+            note: String(s.note || ""),
+          }))
+        : [{ order: 1, outPlayerId: "", inPlayerId: "", note: "" }],
+    );
+  }, [m.id, m.lineup]);
   useEffect(() => {
     if (coachNames.length && !coachNames.includes(commentName)) {
       setCommentName(coachNames[0]);
@@ -564,6 +647,58 @@ function MatchCard({
       if (a.birthYear !== b.birthYear) return a.birthYear - b.birthYear;
       return a.name.localeCompare(b.name, "sv");
     });
+  const outfieldSlots = useMemo(() => buildOutfieldSlots(formationDraft, sideDraft), [formationDraft, sideDraft]);
+  const formationTotal = Number(formationDraft.defenders || 0) + Number(formationDraft.midfielders || 0) + Number(formationDraft.attackers || 0);
+  const starterIds = [keeperId, ...outfieldSlots.map((slot) => starterMap[slot.key] || "")].filter(Boolean);
+  const startersUnique = new Set(starterIds).size === starterIds.length;
+  const startersReady = Boolean(keeperId) && outfieldSlots.every((slot) => Boolean(starterMap[slot.key])) && startersUnique;
+  const selectedById = useMemo(() => {
+    const map = new Map();
+    for (const p of selectedRows) map.set(p.id, p);
+    return map;
+  }, [selectedRows]);
+  const benchPlayers = useMemo(() => {
+    const starterSet = new Set(starterIds);
+    return selectedRows.filter((p) => !starterSet.has(p.id));
+  }, [selectedRows, starterIds]);
+
+  const readPlayerFromDrag = (event) => {
+    const fromData = event.dataTransfer?.getData("text/player-id");
+    return String(fromData || "").trim();
+  };
+  const readSlotFromDrag = (event) => {
+    const fromData = event.dataTransfer?.getData("text/slot-key");
+    return String(fromData || "").trim();
+  };
+  const slotPlayerId = (slotKey) => {
+    if (slotKey === "gk") return keeperId || "";
+    return starterMap[slotKey] || "";
+  };
+  const assignSlotPlayer = (slotKey, playerId) => {
+    if (slotKey === "gk") {
+      setKeeperId(playerId || "");
+      return;
+    }
+    setStarterMap((prev) => ({ ...prev, [slotKey]: playerId || "" }));
+  };
+  const handleDropOnSlot = (event, slotKey) => {
+    event.preventDefault();
+    const playerId = readPlayerFromDrag(event);
+    if (!playerId) return;
+    const fromSlot = readSlotFromDrag(event);
+    if (fromSlot && fromSlot !== slotKey) {
+      const targetCurrent = slotPlayerId(slotKey);
+      assignSlotPlayer(fromSlot, targetCurrent);
+    }
+    assignSlotPlayer(slotKey, playerId);
+  };
+  const handleDropToBench = (event) => {
+    event.preventDefault();
+    const fromSlot = readSlotFromDrag(event);
+    if (!fromSlot) return;
+    assignSlotPlayer(fromSlot, "");
+  };
+
   const names2015 = selectedRows.filter((p) => p.birthYear === 2015).map((p) => p.name);
   const names2016 = selectedRows.filter((p) => p.birthYear === 2016).map((p) => p.name);
 
@@ -587,6 +722,25 @@ function MatchCard({
     if ((m.note || "").trim()) {
       lines.push("");
       lines.push(`Notis: ${(m.note || "").trim()}`);
+    }
+    if (m.lineup?.starters?.length) {
+      lines.push("");
+      lines.push(
+        `Startuppställning (${m.lineup.formation?.defenders || 0}-${m.lineup.formation?.midfielders || 0}-${m.lineup.formation?.attackers || 0}, sida: ${m.lineup.side || "vänster"})`,
+      );
+      const starters = [...(m.lineup.starters || [])].sort((a, b) => Number(a.order || 0) - Number(b.order || 0));
+      for (const s of starters) {
+        lines.push(`- ${roleLabelSv(s.role)} ${s.lane || "central"}: ${playerName(s.playerId)}`);
+      }
+      if (Array.isArray(m.lineup.substitutions) && m.lineup.substitutions.length) {
+        lines.push("");
+        lines.push("Byten:");
+        for (const sub of [...m.lineup.substitutions].sort((a, b) => Number(a.order || 0) - Number(b.order || 0))) {
+          lines.push(
+            `- ${sub.order}. ${playerName(sub.outPlayerId)} -> ${playerName(sub.inPlayerId)}${sub.note ? ` (${sub.note})` : ""}`,
+          );
+        }
+      }
     }
     await navigator.clipboard.writeText(lines.join("\n"));
     setErr("");
@@ -686,6 +840,243 @@ function MatchCard({
           <p className="text-muted">Inget uttag</p>
         )}
       </div>
+
+      {m.selectedPlayerIds.length > 0 && (
+        <div className="group group--flush" style={{ marginBottom: 12 }}>
+          <h4 className="panel__title" style={{ fontSize: 15, margin: "0 0 8px" }}>
+            Startuppställning (1 målvakt + 6 utespelare)
+          </h4>
+          <div className="form-add" style={{ marginBottom: 10 }}>
+            <div className="field">
+              <span className="field__label">Formation (F-M-A)</span>
+              <div style={{ display: "flex", gap: 8 }}>
+                <input
+                  className="field__select"
+                  type="number"
+                  min={1}
+                  max={5}
+                  value={formationDraft.defenders}
+                  onChange={(e) => setFormationDraft((f) => ({ ...f, defenders: Number(e.target.value || 0) }))}
+                />
+                <input
+                  className="field__select"
+                  type="number"
+                  min={0}
+                  max={5}
+                  value={formationDraft.midfielders}
+                  onChange={(e) => setFormationDraft((f) => ({ ...f, midfielders: Number(e.target.value || 0) }))}
+                />
+                <input
+                  className="field__select"
+                  type="number"
+                  min={0}
+                  max={5}
+                  value={formationDraft.attackers}
+                  onChange={(e) => setFormationDraft((f) => ({ ...f, attackers: Number(e.target.value || 0) }))}
+                />
+              </div>
+            </div>
+            <div className="field">
+              <span className="field__label">Spelsida</span>
+              <select className="field__select" value={sideDraft} onChange={(e) => setSideDraft(e.target.value)}>
+                <option value="vänster">Vänster</option>
+                <option value="höger">Höger</option>
+              </select>
+            </div>
+          </div>
+          {formationTotal !== 6 ? (
+            <p className="text-muted">Summan av försvar + mittfält + anfall måste vara 6.</p>
+          ) : (
+            <>
+              <div className="lineup-dnd-help">Dra spelare från bänken till positionerna på planen. Dra tillbaka till bänken för att ta bort.</div>
+              <div
+                className="lineup-bench"
+                onDragOver={(e) => e.preventDefault()}
+                onDrop={handleDropToBench}
+                aria-label="Bänk"
+              >
+                <strong className="lineup-bench__title">Bänk</strong>
+                <div className="lineup-bench__players">
+                  {benchPlayers.length === 0 ? (
+                    <span className="text-muted">Ingen på bänken.</span>
+                  ) : (
+                    benchPlayers.map((p) => (
+                      <button
+                        key={`bench-${p.id}`}
+                        type="button"
+                        className="lineup-bench__chip"
+                        draggable
+                        onDragStart={(e) => {
+                          e.dataTransfer.setData("text/player-id", p.id);
+                          e.dataTransfer.setData("text/slot-key", "");
+                        }}
+                      >
+                        {p.name}
+                        {p.jerseyNumber ? ` #${p.jerseyNumber}` : ""}
+                      </button>
+                    ))
+                  )}
+                </div>
+              </div>
+              {!startersUnique ? <p className="text-muted">Samma spelare kan inte ha flera startpositioner.</p> : null}
+              <h5 className="panel__title" style={{ fontSize: 14, margin: "10px 0 8px" }}>
+                Byten (ordning og hvem som bytter med hvem)
+              </h5>
+              {subsDraft.map((row, idx) => (
+                <div key={`sub-${idx}`} className="form-add" style={{ marginBottom: 8 }}>
+                  <div className="field">
+                    <span className="field__label">Ordning</span>
+                    <input
+                      className="field__select"
+                      type="number"
+                      min={1}
+                      value={row.order}
+                      onChange={(e) =>
+                        setSubsDraft((prev) => prev.map((s, i) => (i === idx ? { ...s, order: Number(e.target.value || 1) } : s)))
+                      }
+                    />
+                  </div>
+                  <div className="field">
+                    <span className="field__label">Ut</span>
+                    <select
+                      className="field__select"
+                      value={row.outPlayerId}
+                      onChange={(e) => setSubsDraft((prev) => prev.map((s, i) => (i === idx ? { ...s, outPlayerId: e.target.value } : s)))}
+                    >
+                      <option value="">Välj</option>
+                      {selectedRows.map((p) => (
+                        <option key={`out-${p.id}`} value={p.id}>
+                          {p.name}
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+                  <div className="field">
+                    <span className="field__label">In</span>
+                    <select
+                      className="field__select"
+                      value={row.inPlayerId}
+                      onChange={(e) => setSubsDraft((prev) => prev.map((s, i) => (i === idx ? { ...s, inPlayerId: e.target.value } : s)))}
+                    >
+                      <option value="">Välj</option>
+                      {selectedRows.map((p) => (
+                        <option key={`in-${p.id}`} value={p.id}>
+                          {p.name}
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+                  <div className="field">
+                    <span className="field__label">Notis</span>
+                    <input
+                      className="field__input"
+                      value={row.note}
+                      onChange={(e) => setSubsDraft((prev) => prev.map((s, i) => (i === idx ? { ...s, note: e.target.value } : s)))}
+                    />
+                  </div>
+                </div>
+              ))}
+              <div className="btn-row" style={{ marginTop: 6 }}>
+                <button
+                  type="button"
+                  className="btn btn--secondary"
+                  onClick={() => setSubsDraft((prev) => [...prev, { order: prev.length + 1, outPlayerId: "", inPlayerId: "", note: "" }])}
+                >
+                  Lägg till byte
+                </button>
+                <button
+                  type="button"
+                  className="btn btn--secondary"
+                  disabled={!subsDraft.length}
+                  onClick={() => setSubsDraft((prev) => (prev.length > 1 ? prev.slice(0, -1) : prev))}
+                >
+                  Ta bort sista
+                </button>
+                <button
+                  type="button"
+                  className="btn btn--primary"
+                  disabled={formationTotal !== 6 || !startersReady}
+                  onClick={async () => {
+                    setErr("");
+                    try {
+                      const starters = [
+                        { playerId: keeperId, role: "goalkeeper", lane: "central", order: 0 },
+                        ...outfieldSlots.map((slot) => ({
+                          playerId: starterMap[slot.key],
+                          role: slot.role,
+                          lane: slot.lane,
+                          order: slot.order,
+                        })),
+                      ];
+                      await api(`/api/matches/${m.id}/lineup`, {
+                        method: "PUT",
+                        body: {
+                          formation: formationDraft,
+                          side: sideDraft,
+                          starters,
+                          substitutions: subsDraft,
+                        },
+                      });
+                      await load();
+                    } catch (x) {
+                      setErr(x.message);
+                    }
+                  }}
+                >
+                  Spara startuppställning
+                </button>
+              </div>
+              <div className="lineup-pitch" aria-label="Startelva på fotbollsplan">
+                <div className="lineup-pitch__surface">
+                  <div className="lineup-pitch__half" />
+                  <div className="lineup-pitch__circle" />
+                  <div className="lineup-pitch__box lineup-pitch__box--top" />
+                  <div className="lineup-pitch__box lineup-pitch__box--bottom" />
+                  {[{ key: "gk", role: "goalkeeper", x: 50, y: 86 }, ...outfieldSlots.map((slot) => ({
+                    key: slot.key,
+                    role: slot.role,
+                    x: slot.lane === "vänster" ? 24 : slot.lane === "höger" ? 76 : 50,
+                    y: slot.role === "defender" ? 66 : slot.role === "midfielder" ? 48 : 30,
+                  }))].map((slotNode) => {
+                    const playerId = slotNode.key === "gk" ? keeperId : starterMap[slotNode.key];
+                    const player = playerId ? selectedById.get(playerId) : null;
+                    return (
+                      <div
+                        key={slotNode.key}
+                        className={`lineup-pitch__slot lineup-pitch__slot--${slotNode.role} ${player ? "is-filled" : ""}`}
+                        style={{ left: `${slotNode.x}%`, top: `${slotNode.y}%` }}
+                        onDragOver={(e) => e.preventDefault()}
+                        onDrop={(e) => handleDropOnSlot(e, slotNode.key)}
+                        title={player ? `${player.name}${player.jerseyNumber ? ` (#${player.jerseyNumber})` : ""}` : roleLabelSv(slotNode.role)}
+                      >
+                        {player ? (
+                          <button
+                            type="button"
+                            className={`lineup-pitch__player lineup-pitch__player--${slotNode.role}`}
+                            draggable
+                            onDragStart={(e) => {
+                              e.dataTransfer.setData("text/player-id", player.id);
+                              e.dataTransfer.setData("text/slot-key", slotNode.key);
+                            }}
+                          >
+                            <span className="lineup-pitch__number">{player.jerseyNumber || "?"}</span>
+                            <span className="lineup-pitch__name">{player.name}</span>
+                          </button>
+                        ) : (
+                          <span className="lineup-pitch__empty">{roleLabelSv(slotNode.role)}</span>
+                        )}
+                      </div>
+                    );
+                  })}
+                </div>
+                <p className="lineup-pitch__meta">
+                  Formation {formationDraft.defenders}-{formationDraft.midfielders}-{formationDraft.attackers} · Spelsida {sideDraft}
+                </p>
+              </div>
+            </>
+          )}
+        </div>
+      )}
 
       <div className="match-comments" aria-label="Kommentarer">
         <h4 className="panel__title" style={{ fontSize: 15, margin: "0 0 8px" }}>
@@ -987,10 +1378,12 @@ export default function App() {
   const [syncMsg, setSyncMsg] = useState("");
   const [loading, setLoading] = useState(true);
   const [tab, setTab] = useState("matches");
-  const [form, setForm] = useState({ name: "", birthYear: "2016" });
+  const [form, setForm] = useState({ name: "", birthYear: "2016", jerseyNumber: "", preferredPosition: "" });
   const [editingId, setEditingId] = useState(null);
   const [editName, setEditName] = useState("");
   const [editYear, setEditYear] = useState("2016");
+  const [editJerseyNumber, setEditJerseyNumber] = useState("");
+  const [editPreferredPosition, setEditPreferredPosition] = useState("");
   const [overviewBirth, setOverviewBirth] = useState("all");
   const [overviewAge, setOverviewAge] = useState("all");
   /** Underflikar inom Spelargrupp: spelarlista, grupper eller tränare */
@@ -1685,9 +2078,14 @@ export default function App() {
                   try {
                     await api("/api/players", {
                       method: "POST",
-                      body: { name: form.name, birthYear: Number(form.birthYear) },
+                      body: {
+                        name: form.name,
+                        birthYear: Number(form.birthYear),
+                        jerseyNumber: form.jerseyNumber ? Number(form.jerseyNumber) : null,
+                        preferredPosition: form.preferredPosition,
+                      },
                     });
-                    setForm({ name: "", birthYear: form.birthYear });
+                    setForm({ name: "", birthYear: form.birthYear, jerseyNumber: "", preferredPosition: form.preferredPosition });
                     await load();
                   } catch (x) {
                     setErr(x.message);
@@ -1716,6 +2114,31 @@ export default function App() {
                     <option value="2016">2016</option>
                   </select>
                 </div>
+                <div className="field">
+                  <span className="field__label">Draktnummer</span>
+                  <input
+                    className="field__input"
+                    type="number"
+                    min={1}
+                    value={form.jerseyNumber}
+                    onChange={(e) => setForm((f) => ({ ...f, jerseyNumber: e.target.value }))}
+                  />
+                </div>
+                <div className="field">
+                  <span className="field__label">Föredragen position</span>
+                  <select
+                    className="field__select"
+                    value={form.preferredPosition}
+                    onChange={(e) => setForm((f) => ({ ...f, preferredPosition: e.target.value }))}
+                  >
+                    <option value="">Ingen</option>
+                    {PLAYER_POSITIONS.map((pos) => (
+                      <option key={pos} value={pos}>
+                        {pos}
+                      </option>
+                    ))}
+                  </select>
+                </div>
                 <button type="submit" className="btn btn--primary">
                   Lägg till spelare
                 </button>
@@ -1726,6 +2149,8 @@ export default function App() {
                   <thead>
                     <tr>
                       <th>Namn</th>
+                      <th>Nr</th>
+                      <th>Position</th>
                       <th>År</th>
                       <th>Grupp</th>
                       <th>Matcher</th>
@@ -1745,7 +2170,7 @@ export default function App() {
                         if (editingId === p.id) {
                           return (
                             <tr key={p.id} className="players-table__edit">
-                              <td colSpan={7} style={{ padding: "12px 14px", background: "var(--fill-secondary)" }}>
+                              <td colSpan={9} style={{ padding: "12px 14px", background: "var(--fill-secondary)" }}>
                                 <div className="form-add" style={{ marginBottom: 0 }}>
                                   <div className="field">
                                     <span className="field__label">Namn</span>
@@ -1766,6 +2191,31 @@ export default function App() {
                                       <option value="2016">2016</option>
                                     </select>
                                   </div>
+                                  <div className="field">
+                                    <span className="field__label">Draktnummer</span>
+                                    <input
+                                      className="field__input"
+                                      type="number"
+                                      min={1}
+                                      value={editJerseyNumber}
+                                      onChange={(e) => setEditJerseyNumber(e.target.value)}
+                                    />
+                                  </div>
+                                  <div className="field">
+                                    <span className="field__label">Föredragen position</span>
+                                    <select
+                                      className="field__select"
+                                      value={editPreferredPosition}
+                                      onChange={(e) => setEditPreferredPosition(e.target.value)}
+                                    >
+                                      <option value="">Ingen</option>
+                                      {PLAYER_POSITIONS.map((pos) => (
+                                        <option key={pos} value={pos}>
+                                          {pos}
+                                        </option>
+                                      ))}
+                                    </select>
+                                  </div>
                                 </div>
                                 <div className="btn-row" style={{ marginTop: 10 }}>
                                   <button
@@ -1776,7 +2226,12 @@ export default function App() {
                                       try {
                                         await api(`/api/players/${p.id}`, {
                                           method: "PUT",
-                                          body: { name: editName, birthYear: Number(editYear) },
+                                          body: {
+                                            name: editName,
+                                            birthYear: Number(editYear),
+                                            jerseyNumber: editJerseyNumber ? Number(editJerseyNumber) : null,
+                                            preferredPosition: editPreferredPosition,
+                                          },
                                         });
                                         setEditingId(null);
                                         await load();
@@ -1804,6 +2259,8 @@ export default function App() {
                             <td className="players-table__name" data-label="Namn">
                               {p.name}
                             </td>
+                            <td data-label="Nr">{p.jerseyNumber || "—"}</td>
+                            <td data-label="Position">{p.preferredPosition || "—"}</td>
                             <td data-label="År">{p.birthYear}</td>
                             <td data-label="Grupp">{p.birthYear === 2015 ? (gLet ? gLet : "—") : "—"}</td>
                             <td data-label="Matcher">{p.matchesPlayed}</td>
@@ -1843,6 +2300,8 @@ export default function App() {
                                     setEditingId(p.id);
                                     setEditName(p.name);
                                     setEditYear(String(p.birthYear));
+                                    setEditJerseyNumber(p.jerseyNumber ? String(p.jerseyNumber) : "");
+                                    setEditPreferredPosition(p.preferredPosition || "");
                                   }}
                                 >
                                   Redigera
