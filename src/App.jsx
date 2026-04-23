@@ -830,11 +830,11 @@ function MatchCard({
       </div>}
 
       {matchSubTab === "lineup" && m.selectedPlayerIds.length > 0 && (
-        <div className="group group--flush" style={{ marginBottom: 12 }}>
+        <div className="group group--flush lineup-panel" style={{ marginBottom: 12 }}>
           <h4 className="panel__title" style={{ fontSize: 15, margin: "0 0 8px" }}>
             Startuppställning (1 målvakt + 6 utespelare)
           </h4>
-          <div className="form-add" style={{ marginBottom: 10 }}>
+          <div className="lineup-formation-wrap" style={{ marginBottom: 10 }}>
             <div className="field">
               <span className="field__label">Formation (F-M-A)</span>
               <div className="lineup-formation-grid">
@@ -905,7 +905,7 @@ function MatchCard({
                   Smart fyll
                 </button>
               </div>
-              <div className="form-add lineup-player-grid">
+              <div className="lineup-player-grid">
                 {selectedRows.map((p) => (
                   <div key={`pos-${p.id}`} className="field">
                     <span className="field__label">
