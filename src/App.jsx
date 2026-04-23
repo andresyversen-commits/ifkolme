@@ -736,18 +736,6 @@ function MatchCard({
             value={commentText}
             onChange={(e) => setCommentText(e.target.value)}
           />
-          <div className="btn-row">
-            {["Sjukdom", "Skadad", "Bortrest", "Sen ankomst"].map((preset) => (
-              <button
-                key={preset}
-                type="button"
-                className="btn btn--plain btn--sm"
-                onClick={() => setCommentText((prev) => (prev ? `${prev.trim()} ${preset}` : preset))}
-              >
-                + {preset}
-              </button>
-            ))}
-          </div>
           <button
             type="button"
             className="btn btn--secondary"
@@ -2019,6 +2007,7 @@ export default function App() {
                           const branchLabel = (m.branch || "p10") === "p11" ? "P11" : "P10";
                           const opponent = calendarOpponentName(m);
                           const oppLogo = calendarOpponentLogo(m);
+                          const hasUpdate = Boolean((m.note || "").trim()) || (m.comments || []).length > 0;
                           return (
                             <button
                               key={m.id}
@@ -2031,6 +2020,7 @@ export default function App() {
                                 <span className={`calendar-match__dot ${st.cls}`} aria-hidden />
                                 <strong>{branchLabel}</strong>
                                 <span className="calendar-event__match-no">Match {m.number}</span>
+                                {hasUpdate ? <span className="calendar-event__update">Notis</span> : null}
                               </div>
                               <div className="calendar-event__opponent">
                                 <CalendarEventCrest name={oppLogo.name} logoUrl={oppLogo.logoUrl} />

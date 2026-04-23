@@ -1034,7 +1034,13 @@ app.post("/api/matches/:id/comments", (req, res) => {
   if (!match) return res.status(404).json({ error: "Match hittades inte" });
   const name = String(req.body?.name || "").trim();
   const text = String(req.body?.text || "").trim();
-  if (!COACH_NAMES.includes(name)) return res.status(400).json({ error: "Ogiltigt namn" });
+  const allowedNames =
+    Array.isArray(state.coaches) && state.coaches.length
+      ? state.coaches.map((c) => String(c?.name || "").trim()).filter(Boolean)
+      : Array.isArray(state.coachNames) && state.coachNames.length
+        ? state.coachNames.map((n) => String(n || "").trim()).filter(Boolean)
+        : [...COACH_NAMES];
+  if (!allowedNames.includes(name)) return res.status(400).json({ error: "Ogiltigt namn" });
   if (!text) return res.status(400).json({ error: "Kommentaren är tom" });
   if (!Array.isArray(match.comments)) match.comments = [];
   match.comments.push({
