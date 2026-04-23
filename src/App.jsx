@@ -2034,7 +2034,6 @@ export default function App() {
                               <div className="calendar-event__top">
                                 <span className={`calendar-match__dot ${st.cls}`} aria-hidden />
                                 <strong>{branchLabel}</strong>
-                                <span className="calendar-event__match-no">Match {m.number}</span>
                                 {hasUpdate ? <span className="calendar-event__update">Notis</span> : null}
                               </div>
                               <div className="calendar-event__opponent">

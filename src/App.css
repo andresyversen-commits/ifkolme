@@ -1266,12 +1266,6 @@ body {
   color: var(--foreground);
 }
 
-.calendar-event__match-no {
-  margin-left: auto;
-  color: var(--muted-foreground);
-  font-size: 10px;
-}
-
 .calendar-event__update {
   display: inline-flex;
   align-items: center;
