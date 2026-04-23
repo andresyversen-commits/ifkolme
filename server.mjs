@@ -37,6 +37,15 @@ const DEFAULT_MINFOTBOLL_ICS_URL =
   process.env.MINFOTBOLL_ICS_URL ||
   "https://minfotboll-api.azurewebsites.net/api/ExternalCalendarAPI/GetMemberCalendar/dmJFMkpKuMBlDjjZjRJNMKsxWnquLwbT.ics";
 
+const PACKAGE_VERSION = (() => {
+  try {
+    return JSON.parse(fs.readFileSync(path.join(__dirname, 'package.json'), 'utf8')).version || 'unknown';
+  } catch {
+    return 'unknown';
+  }
+})();
+const BUILD_COMMIT = process.env.RAILWAY_GIT_COMMIT_SHA || process.env.GITHUB_SHA || '';
+
 function normalizeIcsUrl(rawUrl) {
   const u = String(rawUrl || "").trim();
   if (!u) return DEFAULT_MINFOTBOLL_ICS_URL;
@@ -964,6 +973,15 @@ const isProd = NODE_ENV === "production";
 if (isProd) {
   app.use(express.static(path.join(__dirname, "dist")));
 }
+
+app.get("/api/version", (_req, res) => {
+  res.json({
+    version: PACKAGE_VERSION,
+    commit: BUILD_COMMIT,
+    env: NODE_ENV,
+    updatedAt: new Date().toISOString(),
+  });
+});
 
 app.get("/api/health/db", async (_req, res) => {
   try {

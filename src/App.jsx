@@ -1334,6 +1334,7 @@ export default function App() {
   const [syncingIcs, setSyncingIcs] = useState(false);
   const [coachesDraft, setCoachesDraft] = useState([]);
   const [coachesDraftDirty, setCoachesDraftDirty] = useState(false);
+  const [buildInfo, setBuildInfo] = useState(null);
   const cachedSnapshotRef = useRef(null);
   const restoringSettingsRef = useRef(false);
   const restoredSettingsRef = useRef(false);
@@ -1404,6 +1405,12 @@ export default function App() {
     }, 900);
     return () => window.clearTimeout(timer);
   }, [needRefresh, updateServiceWorker]);
+
+  useEffect(() => {
+    api('/api/version')
+      .then((meta) => setBuildInfo(meta))
+      .catch(() => setBuildInfo(null));
+  }, []);
 
   useEffect(() => {
     if (!state || restoredSettingsRef.current || restoringSettingsRef.current) return;
@@ -1943,7 +1950,7 @@ export default function App() {
           <img className="app-header__logo" src="/logos/ifk-olme.png" alt="IFK Ölme" />
           <div>
             <h1 className="app-title">Lagval</h1>
-            <p className="app-footnote">Olme IF · ungdom</p>
+            <p className="app-footnote">Olme IF · ungdom{buildInfo?.version ? ` · v${buildInfo.version}` : ""}{buildInfo?.commit ? ` · ${String(buildInfo.commit).slice(0, 7)}` : ""}</p>
           </div>
         </div>
       </header>
