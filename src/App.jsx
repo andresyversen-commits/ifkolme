@@ -191,6 +191,16 @@ function FixtureCrest({ name, logoUrl }) {
   );
 }
 
+function CalendarEventCrest({ name, logoUrl }) {
+  const resolvedUrl = useMemo(() => resolveTeamLogoUrl(name, logoUrl), [name, logoUrl]);
+  const [imgFailed, setImgFailed] = useState(false);
+  useEffect(() => setImgFailed(false), [resolvedUrl]);
+  if (!resolvedUrl || imgFailed) {
+    return <span className="calendar-event__crest-fallback">{teamInitials(name || "")}</span>;
+  }
+  return <img className="calendar-event__crest" src={resolvedUrl} alt="" onError={() => setImgFailed(true)} />;
+}
+
 /** Seriekort (serie, tid, lag). */
 function MinFotbollFixture({ fixture }) {
   if (!fixture) return null;
@@ -926,7 +936,7 @@ export default function App() {
   const [okMsg, setOkMsg] = useState("");
   const [syncMsg, setSyncMsg] = useState("");
   const [loading, setLoading] = useState(true);
-  const [tab, setTab] = useState("players");
+  const [tab, setTab] = useState("matches");
   const [form, setForm] = useState({ name: "", birthYear: "2016" });
   const [editingId, setEditingId] = useState(null);
   const [editName, setEditName] = useState("");
@@ -942,6 +952,7 @@ export default function App() {
   const [installHint, setInstallHint] = useState("");
   const [icsUrl, setIcsUrl] = useState(DEFAULT_MINFOTBOLL_ICS_URL);
   const [syncingIcs, setSyncingIcs] = useState(false);
+  const [coachDraft, setCoachDraft] = useState("");
   const {
     needRefresh: [needRefresh, setNeedRefresh],
     updateServiceWorker,
@@ -1034,6 +1045,12 @@ export default function App() {
       // Ignorera localStorage-fel.
     }
   }, [tab, playerSubTab, overviewBirth, overviewAge, activeMatchId, icsUrl]);
+
+  useEffect(() => {
+    const list = Array.isArray(state?.coachNames) ? state.coachNames : [];
+    if (!list.length) return;
+    setCoachDraft(list.join(", "));
+  }, [state?.coachNames]);
 
   useEffect(() => {
     if (!okMsg) return;
@@ -1154,6 +1171,14 @@ export default function App() {
 
   const [simulation, setSimulation] = useState(null);
   const coachNames = state?.coachNames || ["Jonas", "Per", "Anders", "Kim"];
+  const teamNames = useMemo(() => {
+    const set = new Set();
+    for (const m of state?.matches || []) {
+      if (m.fixture?.home) set.add(m.fixture.home);
+      if (m.fixture?.away) set.add(m.fixture.away);
+    }
+    return [...set].sort((a, b) => a.localeCompare(b, "sv"));
+  }, [state?.matches]);
 
   useEffect(() => {
     if (!matchesCalendar.length) return;
@@ -1190,6 +1215,16 @@ export default function App() {
   function calendarTimeLabel(m) {
     if (!m.fixture?.time || m.fixture.time === "00:00") return "Tid ej satt";
     return m.fixture.time;
+  }
+
+  function calendarOpponentLogo(m) {
+    const home = m.fixture?.home || m.fixture?.homeTeam || "";
+    const away = m.fixture?.away || m.fixture?.awayTeam || "";
+    const homeLogo = m.fixture?.homeLogo || state?.teamLogos?.[home];
+    const awayLogo = m.fixture?.awayLogo || state?.teamLogos?.[away];
+    if (/ifk\s*ölme/i.test(home) || /ifk\s*olme/i.test(home)) return { name: away, logoUrl: awayLogo };
+    if (/ifk\s*ölme/i.test(away) || /ifk\s*olme/i.test(away)) return { name: home, logoUrl: homeLogo };
+    return { name: away || home, logoUrl: awayLogo || homeLogo };
   }
 
   const calendarMonthIndex = Math.max(0, calendarMonthKeys.indexOf(calendarMonthView.key));
@@ -1234,6 +1269,53 @@ export default function App() {
     } finally {
       setSyncingIcs(false);
     }
+  }
+
+  async function saveCoachNames() {
+    const names = coachDraft
+      .split(",")
+      .map((n) => n.trim())
+      .filter(Boolean);
+    if (!names.length) {
+      setErr("Ange minst ett tränarnamn.");
+      return;
+    }
+    setErr("");
+    try {
+      const next = await api("/api/settings/coaches", {
+        method: "PUT",
+        body: { coachNames: names },
+      });
+      setState(next);
+      setOkMsg("Tränarnamn uppdaterade.");
+    } catch (e) {
+      setErr(e.message);
+    }
+  }
+
+  async function uploadTeamLogo(team, file) {
+    if (!file) return;
+    const dataUrl = await new Promise((resolve, reject) => {
+      const reader = new FileReader();
+      reader.onload = () => resolve(String(reader.result || ""));
+      reader.onerror = () => reject(new Error("Kunde inte läsa bildfilen."));
+      reader.readAsDataURL(file);
+    });
+    const next = await api("/api/team-logos", {
+      method: "PUT",
+      body: { team, logoDataUrl: dataUrl },
+    });
+    setState(next);
+    setOkMsg(`Logo sparad för ${team}.`);
+  }
+
+  async function clearTeamLogo(team) {
+    const next = await api("/api/team-logos", {
+      method: "PUT",
+      body: { team, logoDataUrl: null },
+    });
+    setState(next);
+    setOkMsg(`Logo borttagen för ${team}.`);
   }
 
   function downloadBlob(filename, blob) {
@@ -1723,6 +1805,41 @@ export default function App() {
               {syncingIcs ? "Synkar..." : "Synka MinFotboll"}
             </button>
           </div>
+          <div className="group" style={{ padding: 12, marginBottom: 12 }}>
+            <p className="panel__lead" style={{ margin: "0 0 8px" }}>
+              Laglogotyper
+            </p>
+            <div className="logo-manager">
+              {teamNames.map((team) => (
+                <div key={team} className="logo-manager__row">
+                  <div className="logo-manager__name">
+                    <FixtureCrest name={team} logoUrl={state?.teamLogos?.[team]} />
+                    <span>{team}</span>
+                  </div>
+                  <label className="btn btn--secondary btn--sm">
+                    Ladda upp logo
+                    <input
+                      type="file"
+                      accept="image/png,image/jpeg,image/webp,image/gif"
+                      style={{ display: "none" }}
+                      onChange={(e) => {
+                        const file = e.target.files?.[0];
+                        uploadTeamLogo(team, file).catch((x) => setErr(x.message));
+                        e.target.value = "";
+                      }}
+                    />
+                  </label>
+                  <button
+                    type="button"
+                    className="btn btn--plain btn--sm"
+                    onClick={() => clearTeamLogo(team).catch((x) => setErr(x.message))}
+                  >
+                    Ta bort
+                  </button>
+                </div>
+              ))}
+            </div>
+          </div>
           <h3 className="panel__title" style={{ fontSize: 17, margin: "0 0 8px" }}>
             Matchkalender
           </h3>
@@ -1768,20 +1885,25 @@ export default function App() {
                         {dayMatches.map((m) => {
                           const st = calendarStatus(m);
                           const branchLabel = (m.branch || "p10") === "p11" ? "P11" : "P10";
+                          const opponent = calendarOpponentName(m);
+                          const oppLogo = calendarOpponentLogo(m);
                           return (
                             <button
                               key={m.id}
                               type="button"
-                              className={`calendar-event${activeMatchId === m.id ? " calendar-event--active" : ""}`}
+                              className={`calendar-event calendar-event--${branchLabel.toLowerCase()}${activeMatchId === m.id ? " calendar-event--active" : ""}`}
                               onClick={() => setActiveMatchId(m.id)}
-                              title={`Match ${m.number} · ${branchLabel} · ${calendarOpponentName(m)} · ${calendarTimeLabel(m)} · ${st.label}`}
+                              title={`Match ${m.number} · ${branchLabel} · ${opponent} · ${calendarTimeLabel(m)} · ${st.label}`}
                             >
                               <div className="calendar-event__top">
                                 <span className={`calendar-match__dot ${st.cls}`} aria-hidden />
                                 <strong>{branchLabel}</strong>
                                 <span className="calendar-event__match-no">Match {m.number}</span>
                               </div>
-                              <div className="calendar-event__opponent">{calendarOpponentName(m)}</div>
+                              <div className="calendar-event__opponent">
+                                <CalendarEventCrest name={oppLogo.name} logoUrl={oppLogo.logoUrl} />
+                                <span>{opponent}</span>
+                              </div>
                               <div className="calendar-event__time">{calendarTimeLabel(m)}</div>
                             </button>
                           );
@@ -1906,6 +2028,27 @@ export default function App() {
           )}
 
           <div className="section-spacer" style={{ marginTop: 20 }}>
+            <div className="group" style={{ padding: 12, marginBottom: 10 }}>
+              <p className="panel__lead" style={{ margin: "0 0 8px" }}>
+                Tränarnamn (kommentarer)
+              </p>
+              <div className="field" style={{ marginBottom: 8 }}>
+                <label className="field__label" htmlFor="coach-names">
+                  Komma-separerade namn
+                </label>
+                <input
+                  id="coach-names"
+                  className="field__input"
+                  type="text"
+                  value={coachDraft}
+                  onChange={(e) => setCoachDraft(e.target.value)}
+                  placeholder="Jonas, Per, Anders, Kim"
+                />
+              </div>
+              <button type="button" className="btn btn--secondary btn--sm" onClick={() => saveCoachNames().catch(() => null)}>
+                Spara tränarnamn
+              </button>
+            </div>
             <div className="btn-row" style={{ marginBottom: 10 }}>
               <button type="button" className="btn btn--secondary btn--block" onClick={exportBackup}>
                 Exportera data

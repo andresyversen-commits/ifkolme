@@ -267,6 +267,8 @@ function defaultState() {
     groups2016: built6.groups2016,
     groups2016Extra: built6.groups2016Extra,
     fixturesP11: [],
+    coachNames: [...COACH_NAMES],
+    teamLogos: {},
   };
 }
 
@@ -415,6 +417,14 @@ function migrateStateShape(data) {
     data.fixturesP11 = [];
     dirty = true;
   }
+  if (!Array.isArray(data.coachNames) || data.coachNames.length === 0) {
+    data.coachNames = [...COACH_NAMES];
+    dirty = true;
+  }
+  if (!data.teamLogos || typeof data.teamLogos !== "object" || Array.isArray(data.teamLogos)) {
+    data.teamLogos = {};
+    dirty = true;
+  }
   if (!data.groups2016 || typeof data.groups2016 !== "object") {
     const built = buildGroups2016FromPlayers(data.players || []);
     data.groups2016 = built.groups2016;
@@ -535,7 +545,8 @@ function jsonState(state) {
     ...state,
     meta: state.meta || { revision: 1, updatedAt: new Date().toISOString() },
     rotationView: buildRotationView(state),
-    coachNames: COACH_NAMES,
+    coachNames: Array.isArray(state.coachNames) && state.coachNames.length ? state.coachNames : [...COACH_NAMES],
+    teamLogos: state.teamLogos && typeof state.teamLogos === "object" ? state.teamLogos : {},
   };
 }
 
@@ -607,6 +618,37 @@ app.post("/api/state/import", (req, res) => {
     }
     return res.status(400).json({ error: "Kunde inte importera backup." });
   }
+});
+
+app.put("/api/settings/coaches", (req, res) => {
+  const state = readState();
+  const names = Array.isArray(req.body?.coachNames)
+    ? req.body.coachNames.map((n) => String(n || "").trim()).filter(Boolean)
+    : [];
+  if (!names.length) return res.status(400).json({ error: "Ange minst ett tränarnamn." });
+  state.coachNames = [...new Set(names)].slice(0, 10);
+  writeState(state);
+  res.json(jsonState(state));
+});
+
+app.put("/api/team-logos", (req, res) => {
+  const state = readState();
+  const team = String(req.body?.team || "").trim();
+  const logoDataUrl = req.body?.logoDataUrl;
+  if (!team) return res.status(400).json({ error: "Lag saknas." });
+  if (!state.teamLogos || typeof state.teamLogos !== "object") state.teamLogos = {};
+  if (logoDataUrl === null) {
+    delete state.teamLogos[team];
+    writeState(state);
+    return res.json(jsonState(state));
+  }
+  const value = String(logoDataUrl || "").trim();
+  if (!/^data:image\/(png|jpeg|jpg|webp|gif);base64,/i.test(value)) {
+    return res.status(400).json({ error: "Ogiltig bild. Ladda upp PNG/JPG/WebP/GIF." });
+  }
+  state.teamLogos[team] = value;
+  writeState(state);
+  res.json(jsonState(state));
 });
 
 /** Spara fasta 2015-grupper (exakt tre spelare per grupp A/B/C, alla nio täckta). */
