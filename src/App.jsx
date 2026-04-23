@@ -6,8 +6,17 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { resolveTeamLogoUrl, teamInitials } from "@/lib/teamLogos";
 import { matchSquadMode, p11Assist2016Count, compareMatchesChronologically } from "../selection.mjs";
 
+const PROD_API_FALLBACK = "https://ifkolme-production.up.railway.app";
+const configuredApiBase = import.meta.env.VITE_API_BASE_URL?.trim();
+const API_BASE = import.meta.env.DEV
+  ? ""
+  : configuredApiBase
+    ? configuredApiBase.replace(/\/+$/, "")
+    : PROD_API_FALLBACK;
+
 async function api(path, options = {}) {
-  const r = await fetch(path, {
+  const url = API_BASE ? `${API_BASE}${path}` : path;
+  const r = await fetch(url, {
     headers: { "Content-Type": "application/json", ...options.headers },
     ...options,
     body: options.body ? JSON.stringify(options.body) : options.body,
@@ -848,6 +857,7 @@ export default function App() {
   const [state, setState] = useState(null);
   const [err, setErr] = useState("");
   const [okMsg, setOkMsg] = useState("");
+  const [syncMsg, setSyncMsg] = useState("");
   const [loading, setLoading] = useState(true);
   const [tab, setTab] = useState("players");
   const [form, setForm] = useState({ name: "", birthYear: "2016" });
@@ -868,19 +878,29 @@ export default function App() {
     updateServiceWorker,
   } = useRegisterSW();
 
-  const load = useCallback(async () => {
-    setErr("");
+  const load = useCallback(async (opts = {}) => {
+    if (!opts.silent) setErr("");
     const s = await api("/api/state");
-    setState(s);
+    setState((prev) => {
+      const prevRev = Number(prev?.meta?.revision || 0);
+      const nextRev = Number(s?.meta?.revision || 0);
+      if (prev && nextRev > prevRev && opts.silent) {
+        setSyncMsg("Data uppdaterad från servern.");
+      }
+      return s;
+    });
+    return s;
   }, []);
 
   useEffect(() => {
+    let hasCachedState = false;
     try {
       const cached = localStorage.getItem(LS_STATE_KEY);
       if (cached) {
         const parsed = JSON.parse(cached);
         if (parsed && parsed.matches && parsed.players) {
           setState(parsed);
+          hasCachedState = true;
           setLoading(false);
         }
       }
@@ -896,7 +916,33 @@ export default function App() {
     } catch {
       // Ignorera trasig localStorage och fortsätt med API.
     }
-    load().catch((e) => setErr(e.message)).finally(() => setLoading(false));
+    load()
+      .catch((e) => {
+        if (!hasCachedState) setErr(e.message);
+      })
+      .finally(() => setLoading(false));
+  }, [load]);
+
+  useEffect(() => {
+    const onFocus = () => {
+      load({ silent: true }).catch(() => null);
+    };
+    const onOnline = () => {
+      setSyncMsg("Ansluten igen. Synkar...");
+      load({ silent: true })
+        .then(() => setSyncMsg("Data synkad."))
+        .catch(() => setSyncMsg("Kunde inte synka just nu."));
+    };
+    window.addEventListener("focus", onFocus);
+    window.addEventListener("online", onOnline);
+    const timer = setInterval(() => {
+      if (navigator.onLine) load({ silent: true }).catch(() => null);
+    }, 15000);
+    return () => {
+      window.removeEventListener("focus", onFocus);
+      window.removeEventListener("online", onOnline);
+      clearInterval(timer);
+    };
   }, [load]);
 
   useEffect(() => {
@@ -924,6 +970,12 @@ export default function App() {
     const t = setTimeout(() => setOkMsg(""), 1800);
     return () => clearTimeout(t);
   }, [okMsg]);
+
+  useEffect(() => {
+    if (!syncMsg) return;
+    const t = setTimeout(() => setSyncMsg(""), 2500);
+    return () => clearTimeout(t);
+  }, [syncMsg]);
 
   useEffect(() => {
     const onBeforeInstall = (e) => {
@@ -1115,8 +1167,13 @@ export default function App() {
   return (
     <div className="app">
       <header className="app-header">
-        <h1 className="app-title">Lagval</h1>
-        <p className="app-footnote">Olme IF · ungdom</p>
+        <div className="app-header__brand">
+          <img className="app-header__logo" src="/logos/ifk-olme.png" alt="IFK Ölme" />
+          <div>
+            <h1 className="app-title">Lagval</h1>
+            <p className="app-footnote">Olme IF · ungdom</p>
+          </div>
+        </div>
       </header>
 
       {err && (
@@ -1127,6 +1184,11 @@ export default function App() {
       {okMsg && (
         <div className="banner banner--ok" role="status">
           {okMsg}
+        </div>
+      )}
+      {syncMsg && (
+        <div className="banner banner--ok" role="status">
+          {syncMsg}
         </div>
       )}
       {needRefresh && (
@@ -1146,7 +1208,7 @@ export default function App() {
         </div>
       )}
 
-      <div className="segmented" role="tablist" aria-label="Huvudnavigering">
+      <div className="segmented app-bottom-nav" role="tablist" aria-label="Huvudnavigering">
         {TABS.map((t) => (
           <button
             key={t.id}

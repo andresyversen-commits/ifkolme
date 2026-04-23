@@ -51,6 +51,18 @@ export default defineConfig({
               networkTimeoutSeconds: 3,
             },
           },
+          {
+            urlPattern: /^https:\/\/ifkolme-production\.up\.railway\.app\/api\/.*/i,
+            handler: "NetworkFirst",
+            options: {
+              cacheName: "api-cache-remote",
+              expiration: {
+                maxEntries: 30,
+                maxAgeSeconds: 60 * 60 * 24 * 7,
+              },
+              networkTimeoutSeconds: 3,
+            },
+          },
         ],
       },
     }),

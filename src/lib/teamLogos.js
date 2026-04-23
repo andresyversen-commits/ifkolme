@@ -47,5 +47,6 @@ export function resolveTeamLogoUrl(name, explicitUrl) {
   if (explicitUrl && typeof explicitUrl === "string" && explicitUrl.trim()) return explicitUrl.trim();
   const slug = teamSlug(name);
   if (!slug) return null;
+  if (slug === "ifk-olme") return `/logos/${slug}.png`;
   return `/logos/${slug}.svg`;
 }

@@ -84,6 +84,10 @@ function defaultState() {
   const players = initialPlayers();
   const built6 = buildGroups2016FromPlayers(players);
   return {
+    meta: {
+      revision: 1,
+      updatedAt: new Date().toISOString(),
+    },
     players,
     matches: initialMatches(),
     groups2015: buildGroups2015FromPlayers(players),
@@ -91,6 +95,23 @@ function defaultState() {
     groups2016Extra: built6.groups2016Extra,
     fixturesP11: [],
   };
+}
+
+function ensureMeta(data) {
+  if (!data.meta || typeof data.meta !== "object") {
+    data.meta = { revision: 1, updatedAt: new Date().toISOString() };
+    return true;
+  }
+  let dirty = false;
+  if (!Number.isFinite(Number(data.meta.revision))) {
+    data.meta.revision = 1;
+    dirty = true;
+  }
+  if (!data.meta.updatedAt || typeof data.meta.updatedAt !== "string") {
+    data.meta.updatedAt = new Date().toISOString();
+    dirty = true;
+  }
+  return dirty;
 }
 
 function migrateAvailability(data) {
@@ -244,6 +265,7 @@ function readState() {
     const data = JSON.parse(raw);
     if (!data.players?.length || !data.matches?.length) return defaultState();
     let dirty = migrateStateShape(data);
+    if (ensureMeta(data)) dirty = true;
     if (migrateAvailability(data)) dirty = true;
     if (repairGroups2015IfNeeded(data)) dirty = true;
     if (repairGroups2016IfNeeded(data)) dirty = true;
@@ -285,6 +307,12 @@ function syncMatchShape(state) {
 }
 
 function writeState(state) {
+  if (!state.meta || typeof state.meta !== "object") {
+    state.meta = { revision: 1, updatedAt: new Date().toISOString() };
+  }
+  const prevRevision = Number(state.meta.revision) || 0;
+  state.meta.revision = prevRevision + 1;
+  state.meta.updatedAt = new Date().toISOString();
   syncMatchShape(state);
   const p11Rows = (state.matches || [])
     .filter((m) => m.branch === "p11" && m.fixture)
@@ -295,7 +323,12 @@ function writeState(state) {
 
 function jsonState(state) {
   syncMatchShape(state);
-  return { ...state, rotationView: buildRotationView(state), coachNames: COACH_NAMES };
+  return {
+    ...state,
+    meta: state.meta || { revision: 1, updatedAt: new Date().toISOString() },
+    rotationView: buildRotationView(state),
+    coachNames: COACH_NAMES,
+  };
 }
 
 const app = express();

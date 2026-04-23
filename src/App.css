@@ -38,6 +38,19 @@ body {
   margin: 0 0 8px;
 }
 
+.app-header__brand {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.app-header__logo {
+  width: 46px;
+  height: 46px;
+  object-fit: contain;
+  flex: 0 0 auto;
+}
+
 .app-title {
   font-size: 28px;
   font-weight: 700;
@@ -116,6 +129,28 @@ body {
 .segmented__btn:focus-visible {
   outline: 2px solid var(--tint);
   outline-offset: 2px;
+}
+
+@media (max-width: 720px) {
+  .app {
+    padding-bottom: calc(84px + env(safe-area-inset-bottom));
+  }
+
+  .app-bottom-nav {
+    position: fixed;
+    left: max(8px, env(safe-area-inset-left));
+    right: max(8px, env(safe-area-inset-right));
+    bottom: max(8px, env(safe-area-inset-bottom));
+    z-index: 40;
+    margin: 0;
+    box-shadow: var(--shadow-card);
+    backdrop-filter: saturate(140%) blur(8px);
+  }
+
+  .app-bottom-nav .segmented__btn {
+    min-height: 44px;
+    font-size: 13px;
+  }
 }
 
 /* Underflikar inom t.ex. Spelargrupp */

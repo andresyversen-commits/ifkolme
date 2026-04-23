@@ -19,6 +19,18 @@ npm run dev
 
 Vite proxar `/api` till servern.
 
+## Fler tränare (gemensam data)
+
+- Produktionsapp: [https://ifkolme-production.up.railway.app/](https://ifkolme-production.up.railway.app/)
+- Alla enheter (mobil/PC) ska använda **samma URL** ovan för att dela samma data.
+- Klienten synkar automatiskt från servern vid fokus, online-händelse och periodiskt.
+- `localStorage` används som offline-cache på varje enhet, men servern är sanningskälla.
+
+### Rekommendation för säkerhet
+
+- Exportera backup regelbundet från appen (**Exportera data**).
+- Om ni använder Railway: se till att datalagring är persistent (volume/DB), annars kan filbaserad data återställas vid omstart/deploy.
+
 ## Bygga och köra produktion (en process)
 
 ```bash
