@@ -64,9 +64,9 @@ function roleLabelSv(role) {
   return role || "—";
 }
 
-function lanePattern(count, side = "vänster") {
+function lanePattern(count) {
   if (count <= 1) return ["central"];
-  if (count === 2) return side === "höger" ? ["central", "höger"] : ["vänster", "central"];
+  if (count === 2) return ["vänster", "höger"];
   if (count === 3) return ["vänster", "central", "höger"];
   if (count === 4) return ["vänster", "central", "central", "höger"];
   return Array.from({ length: count }, (_, i) => {
@@ -76,10 +76,10 @@ function lanePattern(count, side = "vänster") {
   });
 }
 
-function buildOutfieldSlots(formation, side = "vänster") {
+function buildOutfieldSlots(formation) {
   const out = [];
   const pushGroup = (role, n) => {
-    const lanes = lanePattern(n, side);
+    const lanes = lanePattern(n);
     for (let i = 0; i < n; i++) {
       out.push({ key: `${role}-${i + 1}`, role, lane: lanes[i], order: out.length + 1 });
     }
@@ -562,7 +562,8 @@ function MatchCard({
     midfielders: Number(m.lineup?.formation?.midfielders || 2),
     attackers: Number(m.lineup?.formation?.attackers || 2),
   }));
-  const [sideDraft, setSideDraft] = useState(() => (m.lineup?.side === "höger" ? "höger" : "vänster"));
+  const sideDraft = "vänster";
+  const [matchSubTab, setMatchSubTab] = useState("squad");
   const [keeperId, setKeeperId] = useState(() =>
     m.lineup?.starters?.find((s) => s.role === "goalkeeper")?.playerId ? String(m.lineup.starters.find((s) => s.role === "goalkeeper").playerId) : "",
   );
@@ -591,11 +592,10 @@ function MatchCard({
       attackers: Number(m.lineup?.formation?.attackers || 2),
     };
     setFormationDraft(formation);
-    setSideDraft(m.lineup?.side === "höger" ? "höger" : "vänster");
     const gk = m.lineup?.starters?.find((s) => s.role === "goalkeeper");
     setKeeperId(gk?.playerId ? String(gk.playerId) : "");
     const slotMap = {};
-    const slots = buildOutfieldSlots(formation, m.lineup?.side === "höger" ? "höger" : "vänster");
+    const slots = buildOutfieldSlots(formation);
     for (const slot of slots) {
       const row = (m.lineup?.starters || []).find((s) => s.role === slot.role && Number(s.order) === slot.order);
       slotMap[slot.key] = row?.playerId ? String(row.playerId) : "";
@@ -612,6 +612,9 @@ function MatchCard({
         : [{ order: 1, outPlayerId: "", inPlayerId: "", note: "" }],
     );
   }, [m.id, m.lineup]);
+  useEffect(() => {
+    setMatchSubTab("squad");
+  }, [m.id]);
   useEffect(() => {
     if (coachNames.length && !coachNames.includes(commentName)) {
       setCommentName(coachNames[0]);
@@ -647,7 +650,7 @@ function MatchCard({
       if (a.birthYear !== b.birthYear) return a.birthYear - b.birthYear;
       return a.name.localeCompare(b.name, "sv");
     });
-  const outfieldSlots = useMemo(() => buildOutfieldSlots(formationDraft, sideDraft), [formationDraft, sideDraft]);
+  const outfieldSlots = useMemo(() => buildOutfieldSlots(formationDraft), [formationDraft]);
   const formationTotal = Number(formationDraft.defenders || 0) + Number(formationDraft.midfielders || 0) + Number(formationDraft.attackers || 0);
   const starterIds = [keeperId, ...outfieldSlots.map((slot) => starterMap[slot.key] || "")].filter(Boolean);
   const startersUnique = new Set(starterIds).size === starterIds.length;
@@ -725,9 +728,7 @@ function MatchCard({
     }
     if (m.lineup?.starters?.length) {
       lines.push("");
-      lines.push(
-        `Startuppställning (${m.lineup.formation?.defenders || 0}-${m.lineup.formation?.midfielders || 0}-${m.lineup.formation?.attackers || 0}, sida: ${m.lineup.side || "vänster"})`,
-      );
+      lines.push(`Startuppställning (${m.lineup.formation?.defenders || 0}-${m.lineup.formation?.midfielders || 0}-${m.lineup.formation?.attackers || 0})`);
       const starters = [...(m.lineup.starters || [])].sort((a, b) => Number(a.order || 0) - Number(b.order || 0));
       for (const s of starters) {
         lines.push(`- ${roleLabelSv(s.role)} ${s.lane || "central"}: ${playerName(s.playerId)}`);
@@ -814,7 +815,37 @@ function MatchCard({
         </p>
       )}
 
-      <div className="match-card__body">
+      <div className="segmented segmented--nested" role="tablist" aria-label="Matchdetaljer">
+        <button
+          type="button"
+          role="tab"
+          className="segmented__btn"
+          aria-selected={matchSubTab === "squad"}
+          onClick={() => setMatchSubTab("squad")}
+        >
+          Trupp
+        </button>
+        <button
+          type="button"
+          role="tab"
+          className="segmented__btn"
+          aria-selected={matchSubTab === "lineup"}
+          onClick={() => setMatchSubTab("lineup")}
+        >
+          Laguppställning
+        </button>
+        <button
+          type="button"
+          role="tab"
+          className="segmented__btn"
+          aria-selected={matchSubTab === "notes"}
+          onClick={() => setMatchSubTab("notes")}
+        >
+          Notis & kommentarer
+        </button>
+      </div>
+
+      {matchSubTab === "squad" && <div className="match-card__body">
         {m.selectedPlayerIds.length > 0 ? (
           <>
             <p className="match-card__lineup-meta">
@@ -839,9 +870,9 @@ function MatchCard({
         ) : (
           <p className="text-muted">Inget uttag</p>
         )}
-      </div>
+      </div>}
 
-      {m.selectedPlayerIds.length > 0 && (
+      {matchSubTab === "lineup" && m.selectedPlayerIds.length > 0 && (
         <div className="group group--flush" style={{ marginBottom: 12 }}>
           <h4 className="panel__title" style={{ fontSize: 15, margin: "0 0 8px" }}>
             Startuppställning (1 målvakt + 6 utespelare)
@@ -875,13 +906,6 @@ function MatchCard({
                   onChange={(e) => setFormationDraft((f) => ({ ...f, attackers: Number(e.target.value || 0) }))}
                 />
               </div>
-            </div>
-            <div className="field">
-              <span className="field__label">Spelsida</span>
-              <select className="field__select" value={sideDraft} onChange={(e) => setSideDraft(e.target.value)}>
-                <option value="vänster">Vänster</option>
-                <option value="höger">Höger</option>
-              </select>
             </div>
           </div>
           {formationTotal !== 6 ? (
@@ -1070,15 +1094,16 @@ function MatchCard({
                   })}
                 </div>
                 <p className="lineup-pitch__meta">
-                  Formation {formationDraft.defenders}-{formationDraft.midfielders}-{formationDraft.attackers} · Spelsida {sideDraft}
+                  Formation {formationDraft.defenders}-{formationDraft.midfielders}-{formationDraft.attackers}
                 </p>
               </div>
             </>
           )}
         </div>
       )}
+      {matchSubTab === "lineup" && m.selectedPlayerIds.length === 0 && <p className="text-muted">Välj lag först för att sätta laguppställning.</p>}
 
-      <div className="match-comments" aria-label="Kommentarer">
+      {matchSubTab === "notes" && <div className="match-comments" aria-label="Kommentarer">
         <h4 className="panel__title" style={{ fontSize: 15, margin: "0 0 8px" }}>
           Notis
         </h4>
@@ -1161,9 +1186,9 @@ function MatchCard({
             ))
           )}
         </div>
-      </div>
+      </div>}
 
-      {m.status !== "played" && isP11Series && (
+      {matchSubTab === "squad" && m.status !== "played" && isP11Series && (
         <div style={{ marginBottom: 12 }}>
           <label style={{ fontSize: 15, display: "flex", flexWrap: "wrap", alignItems: "center", gap: 8 }}>
             Antal födda 2016 (P 11-assist)
@@ -1195,7 +1220,7 @@ function MatchCard({
         </div>
       )}
 
-      {m.status !== "played" && squadMode === "mixed" && (
+      {matchSubTab === "squad" && m.status !== "played" && squadMode === "mixed" && (
         <div style={{ marginBottom: 12 }}>
           <label className="cb-row" style={{ cursor: "pointer" }}>
             <input
@@ -1248,7 +1273,7 @@ function MatchCard({
         </div>
       )}
 
-      {m.status !== "played" && squadMode === "p11Mixed" && assist2016Target > 0 && (
+      {matchSubTab === "squad" && m.status !== "played" && squadMode === "p11Mixed" && assist2016Target > 0 && (
         <div style={{ marginBottom: 12 }}>
           <label className="cb-row" style={{ cursor: "pointer" }}>
             <input
@@ -1308,7 +1333,7 @@ function MatchCard({
         </div>
       )}
 
-      <div className="match-card__actions">
+      {matchSubTab === "squad" && <div className="match-card__actions">
         <button
           type="button"
           className="btn btn--primary btn--block"
@@ -1365,7 +1390,7 @@ function MatchCard({
         >
           Kopiera lag
         </button>
-      </div>
+      </div>}
       </div>
     </article>
   );
@@ -1375,7 +1400,6 @@ export default function App() {
   const [state, setState] = useState(null);
   const [err, setErr] = useState("");
   const [okMsg, setOkMsg] = useState("");
-  const [syncMsg, setSyncMsg] = useState("");
   const [loading, setLoading] = useState(true);
   const [tab, setTab] = useState("matches");
   const [form, setForm] = useState({ name: "", birthYear: "2016", jerseyNumber: "", preferredPosition: "" });
@@ -1408,14 +1432,7 @@ export default function App() {
   const load = useCallback(async (opts = {}) => {
     if (!opts.silent) setErr("");
     const s = await api("/api/state");
-    setState((prev) => {
-      const prevRev = Number(prev?.meta?.revision || 0);
-      const nextRev = Number(s?.meta?.revision || 0);
-      if (prev && nextRev > prevRev && opts.silent) {
-        setSyncMsg("Data uppdaterad från servern.");
-      }
-      return s;
-    });
+    setState(() => s);
     return s;
   }, []);
 
@@ -1489,7 +1506,6 @@ export default function App() {
           }
         }
         await load({ silent: true });
-        setSyncMsg("Inställningar återställda från lokal cache.");
       } catch {
         // Låt appen fungera vidare även om återställning misslyckas.
       } finally {
@@ -1504,10 +1520,7 @@ export default function App() {
       load({ silent: true }).catch(() => null);
     };
     const onOnline = () => {
-      setSyncMsg("Ansluten igen. Synkar...");
-      load({ silent: true })
-        .then(() => setSyncMsg("Data synkad."))
-        .catch(() => setSyncMsg("Kunde inte synka just nu."));
+      load({ silent: true }).catch(() => null);
     };
     window.addEventListener("focus", onFocus);
     window.addEventListener("online", onOnline);
@@ -1564,12 +1577,6 @@ export default function App() {
     const t = setTimeout(() => setOkMsg(""), 1800);
     return () => clearTimeout(t);
   }, [okMsg]);
-
-  useEffect(() => {
-    if (!syncMsg) return;
-    const t = setTimeout(() => setSyncMsg(""), 2500);
-    return () => clearTimeout(t);
-  }, [syncMsg]);
 
   useEffect(() => {
     const onBeforeInstall = (e) => {
@@ -1966,11 +1973,6 @@ export default function App() {
       {okMsg && (
         <div className="banner banner--ok" role="status">
           {okMsg}
-        </div>
-      )}
-      {syncMsg && (
-        <div className="banner banner--ok" role="status">
-          {syncMsg}
         </div>
       )}
       {needRefresh && (
