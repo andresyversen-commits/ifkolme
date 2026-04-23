@@ -1030,13 +1030,14 @@ body {
 
 .lineup-player-grid {
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+  grid-template-columns: 1fr;
   gap: 12px;
   width: 100%;
 }
 
 .lineup-player-grid .field {
   min-width: 0;
+  width: 100%;
 }
 
 /* Laddning / tomt */
@@ -1971,7 +1972,6 @@ body {
   }
 
   .lineup-player-grid {
-    grid-template-columns: 1fr;
     gap: 10px;
   }
 
