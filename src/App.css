@@ -1028,6 +1028,17 @@ body {
   max-width: 100%;
 }
 
+.lineup-player-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+  gap: 12px;
+  width: 100%;
+}
+
+.lineup-player-grid .field {
+  min-width: 0;
+}
+
 /* Laddning / tomt */
 .app-state {
   display: flex;
@@ -1957,6 +1968,11 @@ body {
   .lineup-formation-grid {
     grid-template-columns: 1fr;
     gap: 6px;
+  }
+
+  .lineup-player-grid {
+    grid-template-columns: 1fr;
+    gap: 10px;
   }
 
   .logo-manager__row {

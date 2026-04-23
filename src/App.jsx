@@ -905,7 +905,7 @@ function MatchCard({
                   Smart fyll
                 </button>
               </div>
-              <div className="form-add">
+              <div className="form-add lineup-player-grid">
                 {selectedRows.map((p) => (
                   <div key={`pos-${p.id}`} className="field">
                     <span className="field__label">
