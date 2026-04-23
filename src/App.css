@@ -1,5 +1,9 @@
 /* App-specifika komponenter (färger/tokens: src/index.css + shadcn) */
 
+:root {
+  --page-gutter: clamp(14px, 2.8vw, 24px);
+}
+
 *,
 *::before,
 *::after {
@@ -21,6 +25,8 @@ body {
   min-height: 100dvh;
   -webkit-font-smoothing: antialiased;
   overflow-x: hidden;
+  --page-gutter-safe-left: max(var(--page-gutter), env(safe-area-inset-left));
+  --page-gutter-safe-right: max(var(--page-gutter), env(safe-area-inset-right));
 }
 
 #root {
@@ -32,10 +38,16 @@ body {
   width: 100%;
   max-width: 100%;
   margin: 0 auto;
-  padding: calc(var(--space) + env(safe-area-inset-top)) calc(var(--space) + env(safe-area-inset-right))
-    calc(var(--space-lg) + env(safe-area-inset-bottom)) calc(var(--space) + env(safe-area-inset-left));
+  padding-top: calc(var(--space) + env(safe-area-inset-top));
+  padding-right: var(--page-gutter-safe-right);
+  padding-bottom: calc(var(--space-lg) + env(safe-area-inset-bottom));
+  padding-left: var(--page-gutter-safe-left);
   padding-bottom: max(24px, env(safe-area-inset-bottom));
   overflow-x: clip;
+}
+
+.app > * {
+  max-width: 100%;
 }
 
 .app-header {
@@ -1827,8 +1839,8 @@ body {
 
 @media (max-width: 480px) {
   .app {
-    padding-left: calc(12px + env(safe-area-inset-left));
-    padding-right: calc(12px + env(safe-area-inset-right));
+    padding-left: var(--page-gutter-safe-left);
+    padding-right: var(--page-gutter-safe-right);
   }
 
   .app-header__logo {
