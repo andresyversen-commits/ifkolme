@@ -46,6 +46,7 @@ const TABS = [
   { id: "players", label: "Spelargrupp" },
   { id: "matches", label: "Matcher" },
   { id: "overview", label: "Statistik" },
+  { id: "settings", label: "Inställningar" },
 ];
 
 const LS_STATE_KEY = "lagval.state.v1";
@@ -987,7 +988,6 @@ export default function App() {
       const ui = localStorage.getItem(LS_UI_KEY);
       if (ui) {
         const parsedUi = JSON.parse(ui);
-        if (parsedUi?.tab) setTab(parsedUi.tab);
         if (parsedUi?.playerSubTab) setPlayerSubTab(parsedUi.playerSubTab);
         if (parsedUi?.overviewBirth) setOverviewBirth(parsedUi.overviewBirth);
         if (parsedUi?.overviewAge) setOverviewAge(parsedUi.overviewAge);
@@ -1039,12 +1039,12 @@ export default function App() {
     try {
       localStorage.setItem(
         LS_UI_KEY,
-        JSON.stringify({ tab, playerSubTab, overviewBirth, overviewAge, activeMatchId, icsUrl }),
+        JSON.stringify({ playerSubTab, overviewBirth, overviewAge, activeMatchId, icsUrl }),
       );
     } catch {
       // Ignorera localStorage-fel.
     }
-  }, [tab, playerSubTab, overviewBirth, overviewAge, activeMatchId, icsUrl]);
+  }, [playerSubTab, overviewBirth, overviewAge, activeMatchId, icsUrl]);
 
   useEffect(() => {
     const list = Array.isArray(state?.coachNames) ? state.coachNames : [];
@@ -1779,67 +1779,6 @@ export default function App() {
           <p className="panel__lead" style={{ marginTop: 0 }}>
             Nästa grupp i tur: <strong>{rotationView?.nextGroupLabel ?? "Grupp A"}</strong>
           </p>
-          <div className="group" style={{ padding: 12, marginBottom: 12 }}>
-            <p className="panel__lead" style={{ margin: "0 0 8px" }}>
-              MinFotboll-koppling (ICS)
-            </p>
-            <div className="field" style={{ marginBottom: 8 }}>
-              <label className="field__label" htmlFor="ics-url">
-                Kalenderlänk
-              </label>
-              <input
-                id="ics-url"
-                className="field__input"
-                type="text"
-                value={icsUrl}
-                onChange={(e) => setIcsUrl(e.target.value)}
-                placeholder="webcal://... eller https://..."
-              />
-            </div>
-            <button
-              type="button"
-              className="btn btn--secondary"
-              onClick={() => syncFromMinFotboll().catch(() => null)}
-              disabled={syncingIcs}
-            >
-              {syncingIcs ? "Synkar..." : "Synka MinFotboll"}
-            </button>
-          </div>
-          <div className="group" style={{ padding: 12, marginBottom: 12 }}>
-            <p className="panel__lead" style={{ margin: "0 0 8px" }}>
-              Laglogotyper
-            </p>
-            <div className="logo-manager">
-              {teamNames.map((team) => (
-                <div key={team} className="logo-manager__row">
-                  <div className="logo-manager__name">
-                    <FixtureCrest name={team} logoUrl={state?.teamLogos?.[team]} />
-                    <span>{team}</span>
-                  </div>
-                  <label className="btn btn--secondary btn--sm">
-                    Ladda upp logo
-                    <input
-                      type="file"
-                      accept="image/png,image/jpeg,image/webp,image/gif"
-                      style={{ display: "none" }}
-                      onChange={(e) => {
-                        const file = e.target.files?.[0];
-                        uploadTeamLogo(team, file).catch((x) => setErr(x.message));
-                        e.target.value = "";
-                      }}
-                    />
-                  </label>
-                  <button
-                    type="button"
-                    className="btn btn--plain btn--sm"
-                    onClick={() => clearTeamLogo(team).catch((x) => setErr(x.message))}
-                  >
-                    Ta bort
-                  </button>
-                </div>
-              ))}
-            </div>
-          </div>
           <h3 className="panel__title" style={{ fontSize: 17, margin: "0 0 8px" }}>
             Matchkalender
           </h3>
@@ -2028,27 +1967,6 @@ export default function App() {
           )}
 
           <div className="section-spacer" style={{ marginTop: 20 }}>
-            <div className="group" style={{ padding: 12, marginBottom: 10 }}>
-              <p className="panel__lead" style={{ margin: "0 0 8px" }}>
-                Tränarnamn (kommentarer)
-              </p>
-              <div className="field" style={{ marginBottom: 8 }}>
-                <label className="field__label" htmlFor="coach-names">
-                  Komma-separerade namn
-                </label>
-                <input
-                  id="coach-names"
-                  className="field__input"
-                  type="text"
-                  value={coachDraft}
-                  onChange={(e) => setCoachDraft(e.target.value)}
-                  placeholder="Jonas, Per, Anders, Kim"
-                />
-              </div>
-              <button type="button" className="btn btn--secondary btn--sm" onClick={() => saveCoachNames().catch(() => null)}>
-                Spara tränarnamn
-              </button>
-            </div>
             <div className="btn-row" style={{ marginBottom: 10 }}>
               <button type="button" className="btn btn--secondary btn--block" onClick={exportBackup}>
                 Exportera data
@@ -2088,6 +2006,96 @@ export default function App() {
               }}
             >
               Återställ säsong
+            </button>
+          </div>
+        </section>
+      )}
+
+      {tab === "settings" && (
+        <section className="panel" role="tabpanel" id="panel-settings" aria-labelledby="tab-settings">
+          <h2 className="panel__title">Inställningar</h2>
+          <div className="group" style={{ padding: 12, marginBottom: 12 }}>
+            <p className="panel__lead" style={{ margin: "0 0 8px" }}>
+              MinFotboll-koppling (ICS)
+            </p>
+            <div className="field" style={{ marginBottom: 8 }}>
+              <label className="field__label" htmlFor="ics-url">
+                Kalenderlänk
+              </label>
+              <input
+                id="ics-url"
+                className="field__input"
+                type="text"
+                value={icsUrl}
+                onChange={(e) => setIcsUrl(e.target.value)}
+                placeholder="webcal://... eller https://..."
+              />
+            </div>
+            <button
+              type="button"
+              className="btn btn--secondary"
+              onClick={() => syncFromMinFotboll().catch(() => null)}
+              disabled={syncingIcs}
+            >
+              {syncingIcs ? "Synkar..." : "Synka MinFotboll"}
+            </button>
+          </div>
+
+          <div className="group" style={{ padding: 12, marginBottom: 12 }}>
+            <p className="panel__lead" style={{ margin: "0 0 8px" }}>
+              Laglogotyper
+            </p>
+            <div className="logo-manager">
+              {teamNames.map((team) => (
+                <div key={team} className="logo-manager__row">
+                  <div className="logo-manager__name">
+                    <FixtureCrest name={team} logoUrl={state?.teamLogos?.[team]} />
+                    <span>{team}</span>
+                  </div>
+                  <label className="btn btn--secondary btn--sm">
+                    Ladda upp logo
+                    <input
+                      type="file"
+                      accept="image/png,image/jpeg,image/webp,image/gif"
+                      style={{ display: "none" }}
+                      onChange={(e) => {
+                        const file = e.target.files?.[0];
+                        uploadTeamLogo(team, file).catch((x) => setErr(x.message));
+                        e.target.value = "";
+                      }}
+                    />
+                  </label>
+                  <button
+                    type="button"
+                    className="btn btn--plain btn--sm"
+                    onClick={() => clearTeamLogo(team).catch((x) => setErr(x.message))}
+                  >
+                    Ta bort
+                  </button>
+                </div>
+              ))}
+            </div>
+          </div>
+
+          <div className="group" style={{ padding: 12, marginBottom: 10 }}>
+            <p className="panel__lead" style={{ margin: "0 0 8px" }}>
+              Tränarnamn (kommentarer)
+            </p>
+            <div className="field" style={{ marginBottom: 8 }}>
+              <label className="field__label" htmlFor="coach-names">
+                Komma-separerade namn
+              </label>
+              <input
+                id="coach-names"
+                className="field__input"
+                type="text"
+                value={coachDraft}
+                onChange={(e) => setCoachDraft(e.target.value)}
+                placeholder="Jonas, Per, Anders, Kim"
+              />
+            </div>
+            <button type="button" className="btn btn--secondary btn--sm" onClick={() => saveCoachNames().catch(() => null)}>
+              Spara tränarnamn
             </button>
           </div>
         </section>
