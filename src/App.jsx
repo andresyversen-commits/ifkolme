@@ -1594,9 +1594,11 @@ export default function App() {
   const [coachesDraft, setCoachesDraft] = useState([]);
   const [coachesDraftDirty, setCoachesDraftDirty] = useState(false);
   const [buildInfo, setBuildInfo] = useState(null);
+  const [bottomNavHidden, setBottomNavHidden] = useState(false);
   const cachedSnapshotRef = useRef(null);
   const restoringSettingsRef = useRef(false);
   const restoredSettingsRef = useRef(false);
+  const lastScrollYRef = useRef(0);
   const {
     needRefresh: [needRefresh, setNeedRefresh],
     updateServiceWorker,
@@ -1622,6 +1624,55 @@ export default function App() {
     const s = await api("/api/state");
     setState(() => s);
     return s;
+  }, []);
+
+  useEffect(() => {
+    setBottomNavHidden(false);
+  }, [tab]);
+
+  useEffect(() => {
+    const mm = window.matchMedia("(max-width: 720px)");
+    let raf = 0;
+
+    const isMobileNav = () => mm.matches;
+
+    const onScroll = () => {
+      cancelAnimationFrame(raf);
+      raf = requestAnimationFrame(() => {
+        if (!isMobileNav()) {
+          setBottomNavHidden(false);
+          return;
+        }
+        const y = window.scrollY || document.documentElement.scrollTop || 0;
+        const last = lastScrollYRef.current;
+        const delta = y - last;
+        lastScrollYRef.current = y;
+
+        if (y < 36) {
+          setBottomNavHidden(false);
+          return;
+        }
+
+        if (delta > 8) setBottomNavHidden(true);
+        else if (delta < -8) setBottomNavHidden(false);
+      });
+    };
+
+    const onMq = () => {
+      if (!mm.matches) setBottomNavHidden(false);
+    };
+
+    lastScrollYRef.current = window.scrollY || document.documentElement.scrollTop || 0;
+    window.addEventListener("scroll", onScroll, { passive: true });
+    mm.addEventListener("change", onMq);
+    window.addEventListener("resize", onMq);
+
+    return () => {
+      cancelAnimationFrame(raf);
+      window.removeEventListener("scroll", onScroll);
+      mm.removeEventListener("change", onMq);
+      window.removeEventListener("resize", onMq);
+    };
   }, []);
 
   useEffect(() => {
@@ -2252,7 +2303,7 @@ export default function App() {
   }
 
   return (
-    <div className="app">
+    <div className={`app${bottomNavHidden ? " app--bottom-nav-hidden" : ""}`}>
       <header className="app-header">
         <div className="app-header__brand">
           <img className="app-header__logo" src="/logos/ifk-olme.png" alt="IFK Ölme" />
@@ -2306,7 +2357,12 @@ export default function App() {
         </div>
       )}
 
-      <div className="segmented app-bottom-nav" role="tablist" aria-label="Huvudnavigering">
+      <div
+        className={`segmented app-bottom-nav${bottomNavHidden ? " app-bottom-nav--hidden" : ""}`}
+        role="tablist"
+        aria-label="Huvudnavigering"
+        aria-hidden={bottomNavHidden ? true : undefined}
+      >
         {TABS.map((t) => (
           <button
             key={t.id}
@@ -2316,7 +2372,11 @@ export default function App() {
             id={`tab-${t.id}`}
             aria-controls={`panel-${t.id}`}
             className="segmented__btn"
-            onClick={() => setTab(t.id)}
+            tabIndex={bottomNavHidden ? -1 : undefined}
+            onClick={() => {
+              setBottomNavHidden(false);
+              setTab(t.id);
+            }}
           >
             {t.label}
           </button>

@@ -213,6 +213,11 @@ body {
     padding-bottom: calc(84px + env(safe-area-inset-bottom));
   }
 
+  /* Mindre tomt nederst når fanemenyen er skjult (scroll ned) */
+  .app.app--bottom-nav-hidden {
+    padding-bottom: max(20px, env(safe-area-inset-bottom));
+  }
+
   .app-bottom-nav {
     position: fixed;
     left: 0;
@@ -235,9 +240,20 @@ body {
     /* Ekstra padding under tappene + safe area (hjem-indikator) */
     padding-top: 6px;
     padding-bottom: max(10px, env(safe-area-inset-bottom, 0px));
-    /* Unngå subpiksel-glipp mot kanten på iOS */
-    transform: translateZ(0);
-    -webkit-transform: translateZ(0);
+    transition: transform 0.24s cubic-bezier(0.4, 0, 0.2, 1), box-shadow 0.24s ease;
+    will-change: transform;
+  }
+
+  .app-bottom-nav.app-bottom-nav--hidden {
+    transform: translate3d(0, calc(100% + 12px), 0);
+    box-shadow: none;
+    pointer-events: none;
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    .app-bottom-nav {
+      transition-duration: 0.01ms;
+    }
   }
 
   .app-bottom-nav .segmented__btn {
