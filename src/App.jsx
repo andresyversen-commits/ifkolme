@@ -1002,6 +1002,7 @@ export default function App() {
   const [icsUrl, setIcsUrl] = useState(DEFAULT_MINFOTBOLL_ICS_URL);
   const [syncingIcs, setSyncingIcs] = useState(false);
   const [coachesDraft, setCoachesDraft] = useState([]);
+  const [coachesDraftDirty, setCoachesDraftDirty] = useState(false);
   const {
     needRefresh: [needRefresh, setNeedRefresh],
     updateServiceWorker,
@@ -1100,6 +1101,7 @@ export default function App() {
       : Array.isArray(state?.coachNames)
         ? state.coachNames.map((name, i) => ({ id: `coach-${i + 1}`, name, phone: "", role: "", note: "" }))
         : [];
+    if (coachesDraftDirty) return;
     setCoachesDraft(
       incoming.map((c, i) => ({
         id: c?.id ? String(c.id) : `coach-${i + 1}`,
@@ -1109,7 +1111,7 @@ export default function App() {
         note: String(c?.note || ""),
       })),
     );
-  }, [state?.coaches, state?.coachNames]);
+  }, [state?.coaches, state?.coachNames, coachesDraftDirty]);
 
   useEffect(() => {
     if (!okMsg) return;
@@ -1366,6 +1368,7 @@ export default function App() {
         body: { coaches: cleaned },
       });
       setState(next);
+      setCoachesDraftDirty(false);
       setOkMsg("Tränarlista uppdaterad.");
     } catch (e) {
       setErr(e.message);
@@ -1862,9 +1865,10 @@ export default function App() {
                         className="field__input"
                         value={c.name}
                         onChange={(e) =>
-                          setCoachesDraft((prev) =>
-                            prev.map((row, i) => (i === idx ? { ...row, name: e.target.value } : row)),
-                          )
+                          setCoachesDraft((prev) => {
+                            setCoachesDraftDirty(true);
+                            return prev.map((row, i) => (i === idx ? { ...row, name: e.target.value } : row));
+                          })
                         }
                       />
                     </div>
@@ -1874,9 +1878,10 @@ export default function App() {
                         className="field__input"
                         value={c.phone}
                         onChange={(e) =>
-                          setCoachesDraft((prev) =>
-                            prev.map((row, i) => (i === idx ? { ...row, phone: e.target.value } : row)),
-                          )
+                          setCoachesDraft((prev) => {
+                            setCoachesDraftDirty(true);
+                            return prev.map((row, i) => (i === idx ? { ...row, phone: e.target.value } : row));
+                          })
                         }
                         placeholder="+46..."
                       />
@@ -1887,9 +1892,10 @@ export default function App() {
                         className="field__input"
                         value={c.role}
                         onChange={(e) =>
-                          setCoachesDraft((prev) =>
-                            prev.map((row, i) => (i === idx ? { ...row, role: e.target.value } : row)),
-                          )
+                          setCoachesDraft((prev) => {
+                            setCoachesDraftDirty(true);
+                            return prev.map((row, i) => (i === idx ? { ...row, role: e.target.value } : row));
+                          })
                         }
                         placeholder="Huvudtränare / Assisterande"
                       />
@@ -1901,9 +1907,10 @@ export default function App() {
                         rows={2}
                         value={c.note}
                         onChange={(e) =>
-                          setCoachesDraft((prev) =>
-                            prev.map((row, i) => (i === idx ? { ...row, note: e.target.value } : row)),
-                          )
+                          setCoachesDraft((prev) => {
+                            setCoachesDraftDirty(true);
+                            return prev.map((row, i) => (i === idx ? { ...row, note: e.target.value } : row));
+                          })
                         }
                         placeholder="Valfri info"
                       />
@@ -1912,7 +1919,12 @@ export default function App() {
                       <button
                         type="button"
                         className="btn btn--plain btn--sm"
-                        onClick={() => setCoachesDraft((prev) => prev.filter((_, i) => i !== idx))}
+                        onClick={() =>
+                          setCoachesDraft((prev) => {
+                            setCoachesDraftDirty(true);
+                            return prev.filter((_, i) => i !== idx);
+                          })
+                        }
                       >
                         Ta bort
                       </button>
@@ -1925,10 +1937,13 @@ export default function App() {
                   type="button"
                   className="btn btn--secondary btn--sm"
                   onClick={() =>
-                    setCoachesDraft((prev) => [
-                      ...prev,
-                      { id: `coach-${Date.now()}-${prev.length + 1}`, name: "", phone: "", role: "", note: "" },
-                    ])
+                    setCoachesDraft((prev) => {
+                      setCoachesDraftDirty(true);
+                      return [
+                        ...prev,
+                        { id: `coach-${Date.now()}-${prev.length + 1}`, name: "", phone: "", role: "", note: "" },
+                      ];
+                    })
                   }
                 >
                   Lägg till tränare
