@@ -627,6 +627,32 @@ function normalizeLineup(raw) {
   return { formation, side, starters, substitutions };
 }
 
+function normalizeMatchReportPayload(raw) {
+  const o = raw && typeof raw === "object" && !Array.isArray(raw) ? raw : {};
+  const result = String(o.result ?? "").trim().slice(0, 40);
+  const positive = String(o.positive ?? "").trim().slice(0, 4000);
+  const negative = String(o.negative ?? "").trim().slice(0, 4000);
+  let opponentRating = o.opponentRating;
+  if (opponentRating === "" || opponentRating === null || opponentRating === undefined) {
+    opponentRating = null;
+  } else {
+    const n = Math.round(Number(opponentRating));
+    opponentRating = Number.isFinite(n) ? Math.min(5, Math.max(1, n)) : null;
+  }
+  return { result, positive, negative, opponentRating };
+}
+
+function matchReportHasContent(r) {
+  if (!r || typeof r !== "object") return false;
+  const { result, positive, negative, opponentRating } = r;
+  return Boolean(
+    String(result || "").trim() ||
+      String(positive || "").trim() ||
+      String(negative || "").trim() ||
+      opponentRating != null,
+  );
+}
+
 function reconcilePlayerStats(state) {
   let dirty = false;
   for (const m of state.matches) {
@@ -719,6 +745,21 @@ function migrateStateShape(data) {
       const s = typeof m.fixture?.series === "string" ? m.fixture.series : "";
       m.branch = s.includes("P 11") ? "p11" : "p10";
       dirty = true;
+    }
+    if (m.matchReport !== undefined && m.matchReport !== null) {
+      if (typeof m.matchReport !== "object" || Array.isArray(m.matchReport)) {
+        m.matchReport = null;
+        dirty = true;
+      } else {
+        const n = normalizeMatchReportPayload(m.matchReport);
+        if (!matchReportHasContent(n)) {
+          m.matchReport = null;
+          dirty = true;
+        } else if (JSON.stringify(n) !== JSON.stringify(m.matchReport)) {
+          m.matchReport = n;
+          dirty = true;
+        }
+      }
     }
   }
   if (!Array.isArray(data.fixturesP11)) {
@@ -912,6 +953,14 @@ function syncMatchShape(state) {
     m.selectedPlayers = Array.isArray(m.selectedPlayerIds) ? [...m.selectedPlayerIds] : [];
     m.group2015 = m.intendedGroup2015 ?? null;
     if (!Array.isArray(m.comments)) m.comments = [];
+    if (m.matchReport != null) {
+      if (typeof m.matchReport !== "object" || Array.isArray(m.matchReport)) {
+        m.matchReport = null;
+      } else {
+        const n = normalizeMatchReportPayload(m.matchReport);
+        m.matchReport = matchReportHasContent(n) ? n : null;
+      }
+    }
   }
 }
 
@@ -1426,10 +1475,30 @@ app.post("/api/matches/:id/complete", async (req, res) => {
     }
   }
 
+  const normalizedReport = normalizeMatchReportPayload(req.body?.matchReport ?? req.body ?? {});
+  match.matchReport = matchReportHasContent(normalizedReport) ? normalizedReport : null;
+
   match.status = "played";
   reconcilePlayerStats(state);
   await writeState(state);
   res.json(jsonState(state));
+});
+
+app.put("/api/matches/:id/report", async (req, res) => {
+  try {
+    const state = await readState();
+    const match = state.matches.find((m) => m.id === req.params.id);
+    if (!match) return res.status(404).json({ error: "Match hittades inte" });
+    if (match.status !== "played") {
+      return res.status(400).json({ error: "Endast genomförda matcher kan ha rapport" });
+    }
+    const normalizedReport = normalizeMatchReportPayload(req.body?.matchReport ?? req.body ?? {});
+    match.matchReport = matchReportHasContent(normalizedReport) ? normalizedReport : null;
+    await writeState(state);
+    res.json(jsonState(state));
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
 });
 
 /** Ångra match — tar bort genomförd status, återställer rotation utifrån kvarvarande matcher, uppdaterar statistik. */
@@ -1442,6 +1511,7 @@ app.post("/api/matches/:id/reopen", async (req, res) => {
   match.intendedGroup2015 = null;
   match.intendedGroup2016 = null;
   match.selectionExplanation = null;
+  match.matchReport = null;
   reconcilePlayerStats(state);
   await writeState(state);
   res.json(jsonState(state));
@@ -1495,6 +1565,7 @@ app.post("/api/reset-season", async (_req, res) => {
     m.intendedGroup2015 = null;
     m.intendedGroup2016 = null;
     m.selectionExplanation = null;
+    m.matchReport = null;
   }
   repairGroups2015IfNeeded(state);
   repairGroups2016IfNeeded(state);

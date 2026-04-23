@@ -99,6 +99,28 @@ function slotLabelFromKey(slotKey, outfieldSlots) {
   return `${roleLabelSv(slot.role)} (${lane})`;
 }
 
+function displayMatchResult(result) {
+  return String(result || "")
+    .trim()
+    .replace(/\s*-\s*/g, "–");
+}
+
+function opponentRatingLabel(n) {
+  const x = Math.round(Number(n));
+  if (!Number.isFinite(x) || x < 1 || x > 5) return "";
+  return `${"★".repeat(x)}${"☆".repeat(5 - x)} (${x}/5)`;
+}
+
+function matchReportHasContentForCopy(r) {
+  if (!r || typeof r !== "object") return false;
+  return Boolean(
+    String(r.result || "").trim() ||
+      String(r.positive || "").trim() ||
+      String(r.negative || "").trim() ||
+      r.opponentRating != null,
+  );
+}
+
 function seasonYear() {
   return new Date().getFullYear();
 }
@@ -579,6 +601,14 @@ function MatchCard({
   const sideDraft = "vänster";
   const [matchSubTab, setMatchSubTab] = useState("squad");
   const [positionDraftByPlayer, setPositionDraftByPlayer] = useState({});
+  const [matchDialog, setMatchDialog] = useState(null);
+  const [reportForm, setReportForm] = useState({
+    result: "",
+    positive: "",
+    negative: "",
+    opponentRating: "",
+  });
+  const [reportBusy, setReportBusy] = useState(false);
 
   useEffect(() => {
     setAssistDraft(String(m.fixture?.p11Assist2016 ?? 0));
@@ -617,6 +647,53 @@ function MatchCard({
       setCommentName(coachNames[0]);
     }
   }, [coachNames, commentName]);
+
+  useEffect(() => {
+    setMatchDialog(null);
+    setReportForm({ result: "", positive: "", negative: "", opponentRating: "" });
+    setReportBusy(false);
+  }, [m.id]);
+
+  useEffect(() => {
+    if (!matchDialog) return undefined;
+    const onKey = (e) => {
+      if (e.key === "Escape") setMatchDialog(null);
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [matchDialog]);
+
+  const buildMatchReportPayload = () => {
+    let rating = null;
+    if (reportForm.opponentRating !== "" && reportForm.opponentRating != null) {
+      const n = Math.round(Number(reportForm.opponentRating));
+      if (Number.isFinite(n)) rating = Math.min(5, Math.max(1, n));
+    }
+    return {
+      matchReport: {
+        result: reportForm.result.trim(),
+        positive: reportForm.positive.trim(),
+        negative: reportForm.negative.trim(),
+        opponentRating: rating,
+      },
+    };
+  };
+
+  const openCompleteDialog = () => {
+    setReportForm({ result: "", positive: "", negative: "", opponentRating: "" });
+    setMatchDialog("complete");
+  };
+
+  const openReportDialog = () => {
+    const r = m.matchReport;
+    setReportForm({
+      result: String(r?.result || ""),
+      positive: String(r?.positive || ""),
+      negative: String(r?.negative || ""),
+      opponentRating: r?.opponentRating != null ? String(r.opponentRating) : "",
+    });
+    setMatchDialog("report");
+  };
 
   const toggle2015 = (id) => {
     setManualIds((prev) => {
@@ -702,6 +779,14 @@ function MatchCard({
         lines.push(`- ${roleLabelSv(s.role)} ${s.lane || "central"}: ${playerName(s.playerId)}`);
       }
     }
+    if (m.status === "played" && m.matchReport && matchReportHasContentForCopy(m.matchReport)) {
+      lines.push("");
+      lines.push("Matchrapport:");
+      if (m.matchReport.result) lines.push(`Resultat: ${m.matchReport.result}`);
+      if (m.matchReport.positive) lines.push(`Positivt: ${m.matchReport.positive}`);
+      if (m.matchReport.negative) lines.push(`Minus / förbättring: ${m.matchReport.negative}`);
+      if (m.matchReport.opponentRating != null) lines.push(`Motståndare: ${m.matchReport.opponentRating}/5`);
+    }
     await navigator.clipboard.writeText(lines.join("\n"));
     setErr("");
     if (typeof onCopied === "function") onCopied("Lag kopierat till urklipp.");
@@ -753,6 +838,20 @@ function MatchCard({
           ) : (
             <span className="badge badge--muted">Kommande</span>
           )}
+          {m.status === "played" && m.matchReport?.result ? (
+            <span className="match-card__result-badge" title="Resultat">
+              {displayMatchResult(m.matchReport.result)}
+            </span>
+          ) : m.status === "played" && m.matchReport?.opponentRating != null ? (
+            <span className="match-card__rating-compact" title="Motståndare">
+              {m.matchReport.opponentRating}/5
+            </span>
+          ) : null}
+          {m.status === "played" && (
+            <button type="button" className="btn btn--secondary btn--sm match-card__report-btn" onClick={openReportDialog}>
+              Rapport
+            </button>
+          )}
           {m.status === "played" && (
             <button
               type="button"
@@ -779,6 +878,12 @@ function MatchCard({
           )}
         </div>
       </div>
+
+      {(m.branch || "p10") !== "p11" && rotationView ? (
+        <p className="match-card__next-group">
+          Nästa grupp i tur: <strong>{rotationView.nextGroupLabel ?? "Grupp A"}</strong>
+        </p>
+      ) : null}
 
       {m.intendedGroup2015 && (
         <p style={{ margin: "0 0 8px", fontSize: 15, fontWeight: 600 }}>
@@ -1150,9 +1255,6 @@ function MatchCard({
               }}
             />
           </label>
-          <p style={{ margin: "6px 0 0", fontSize: 13, color: "var(--muted-foreground)" }}>
-            0 = endast 2015. När antalet är 1–20 föreslår appen nästa i kön utifrån 2016-grupper A/B/C. Spara genom att lämna fältet (blur) eller tryck Tab.
-          </p>
         </div>
       )}
 
@@ -1304,15 +1406,7 @@ function MatchCard({
           type="button"
           className="btn btn--secondary btn--block"
           disabled={m.status === "played" || !m.selectedPlayerIds.length}
-          onClick={async () => {
-            setErr("");
-            try {
-              await api(`/api/matches/${m.id}/complete`, { method: "POST" });
-              await load();
-            } catch (x) {
-              setErr(x.message);
-            }
-          }}
+          onClick={openCompleteDialog}
         >
           Markera som genomförd
         </button>
@@ -1328,6 +1422,146 @@ function MatchCard({
         </button>
       </div>}
       </div>
+
+      {matchDialog ? (
+        <div
+          className="modal-overlay"
+          role="presentation"
+          onMouseDown={(e) => {
+            if (e.target === e.currentTarget && !reportBusy) setMatchDialog(null);
+          }}
+        >
+          <div
+            className="modal-sheet"
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby={`match-dialog-title-${m.id}`}
+            onMouseDown={(e) => e.stopPropagation()}
+          >
+            <h4 className="modal-sheet__title" id={`match-dialog-title-${m.id}`}>
+              {matchDialog === "complete" ? "Genomför match" : "Matchrapport"}
+            </h4>
+
+            <div className="modal-sheet__field">
+              <label className="field__label" htmlFor={`mr-result-${m.id}`}>
+                Resultat
+              </label>
+              <input
+                id={`mr-result-${m.id}`}
+                className="field__input"
+                type="text"
+                inputMode="text"
+                placeholder="t.ex. 3–1"
+                value={reportForm.result}
+                onChange={(e) => setReportForm((f) => ({ ...f, result: e.target.value }))}
+                maxLength={40}
+              />
+            </div>
+            <div className="modal-sheet__field">
+              <label className="field__label" htmlFor={`mr-pos-${m.id}`}>
+                Positivt att ta med
+              </label>
+              <textarea
+                id={`mr-pos-${m.id}`}
+                className="field__input"
+                rows={3}
+                value={reportForm.positive}
+                onChange={(e) => setReportForm((f) => ({ ...f, positive: e.target.value }))}
+                maxLength={4000}
+              />
+            </div>
+            <div className="modal-sheet__field">
+              <label className="field__label" htmlFor={`mr-neg-${m.id}`}>
+                Förbättring / minus
+              </label>
+              <textarea
+                id={`mr-neg-${m.id}`}
+                className="field__input"
+                rows={3}
+                value={reportForm.negative}
+                onChange={(e) => setReportForm((f) => ({ ...f, negative: e.target.value }))}
+                maxLength={4000}
+              />
+            </div>
+            <div className="modal-sheet__field">
+              <label className="field__label" htmlFor={`mr-rate-${m.id}`}>
+                Motståndare (1–5)
+              </label>
+              <select
+                id={`mr-rate-${m.id}`}
+                className="field__select"
+                value={reportForm.opponentRating}
+                onChange={(e) => setReportForm((f) => ({ ...f, opponentRating: e.target.value }))}
+              >
+                <option value="">—</option>
+                {[1, 2, 3, 4, 5].map((n) => (
+                  <option key={n} value={String(n)}>
+                    {n} av 5
+                  </option>
+                ))}
+              </select>
+              {reportForm.opponentRating ? (
+                <p className="modal-sheet__rating-preview">{opponentRatingLabel(Number(reportForm.opponentRating))}</p>
+              ) : null}
+            </div>
+
+            <div className="modal-sheet__actions">
+              <button type="button" className="btn btn--secondary" disabled={reportBusy} onClick={() => setMatchDialog(null)}>
+                Avbryt
+              </button>
+              {matchDialog === "complete" ? (
+                <button
+                  type="button"
+                  className="btn btn--primary"
+                  disabled={reportBusy}
+                  onClick={async () => {
+                    setErr("");
+                    setReportBusy(true);
+                    try {
+                      await api(`/api/matches/${m.id}/complete`, {
+                        method: "POST",
+                        body: buildMatchReportPayload(),
+                      });
+                      setMatchDialog(null);
+                      await load();
+                    } catch (x) {
+                      setErr(x.message);
+                    } finally {
+                      setReportBusy(false);
+                    }
+                  }}
+                >
+                  {reportBusy ? "Sparar…" : "Markera som genomförd"}
+                </button>
+              ) : (
+                <button
+                  type="button"
+                  className="btn btn--primary"
+                  disabled={reportBusy}
+                  onClick={async () => {
+                    setErr("");
+                    setReportBusy(true);
+                    try {
+                      await api(`/api/matches/${m.id}/report`, {
+                        method: "PUT",
+                        body: buildMatchReportPayload(),
+                      });
+                      setMatchDialog(null);
+                      await load();
+                    } catch (x) {
+                      setErr(x.message);
+                    } finally {
+                      setReportBusy(false);
+                    }
+                  }}
+                >
+                  {reportBusy ? "Sparar…" : "Spara rapport"}
+                </button>
+              )}
+            </div>
+          </div>
+        </div>
+      ) : null}
     </article>
   );
 }
@@ -1643,6 +1877,18 @@ export default function App() {
       cells,
     };
   }, [matchesCalendar, visibleCalendarMonth]);
+
+  /** Kronologisk liste for mobil (månedsrute er for smal). */
+  const calendarMonthAgenda = useMemo(() => {
+    const { year, month } = visibleCalendarMonth;
+    return matchesCalendar
+      .filter((m) => {
+        const dt = parseIsoDateLocal(m.fixture?.date);
+        return dt && dt.getFullYear() === year && dt.getMonth() === month;
+      })
+      .sort(compareMatchesChronologically);
+  }, [matchesCalendar, visibleCalendarMonth]);
+
   const players2015 = useMemo(
     () => (state?.players ? state.players.filter((p) => p.birthYear === 2015) : []),
     [state?.players]
@@ -1934,6 +2180,8 @@ export default function App() {
         "Grupp (2015)": m.group2015 ?? m.intendedGroup2015 ?? "—",
         "Spelare valda": (m.selectedPlayers || m.selectedPlayerIds || []).length,
         Status: m.status === "played" ? "Spelad" : (m.selectedPlayerIds || []).length ? "Lag valt" : "Ej vald",
+        Resultat: m.matchReport?.result ?? "—",
+        "Motståndare (1–5)": m.matchReport?.opponentRating ?? "—",
       })),
     );
     const commentRows = [];
@@ -2013,6 +2261,22 @@ export default function App() {
             <p className="app-footnote">Olme IF · ungdom{buildInfo?.version ? ` · v${buildInfo.version}` : ""}{buildInfo?.commit ? ` · ${String(buildInfo.commit).slice(0, 7)}` : ""}</p>
           </div>
         </div>
+        <div className="app-header__actions">
+          <button
+            type="button"
+            className="app-install-btn"
+            onClick={() => installApp().catch(() => null)}
+            title="Installera som app på enheten"
+            aria-label="Installera app"
+          >
+            Installera
+          </button>
+          {installHint ? (
+            <p className="app-install-hint" role="status">
+              {installHint}
+            </p>
+          ) : null}
+        </div>
       </header>
 
       {err && (
@@ -2058,16 +2322,6 @@ export default function App() {
           </button>
         ))}
       </div>
-      <div className="btn-row" style={{ marginTop: -8, marginBottom: 12 }}>
-        <button type="button" className="btn btn--secondary" onClick={() => installApp().catch(() => null)}>
-          Installera app
-        </button>
-      </div>
-      {installHint ? (
-        <div className="banner banner--ok" role="status" style={{ marginTop: -6 }}>
-          {installHint}
-        </div>
-      ) : null}
 
       {tab === "players" && (
         <section className="panel" role="tabpanel" id="panel-players" aria-labelledby="tab-players">
@@ -2531,9 +2785,6 @@ export default function App() {
             </div>
           )}
 
-          <p className="panel__lead" style={{ marginTop: 0 }}>
-            Nästa grupp i tur: <strong>{rotationView?.nextGroupLabel ?? "Grupp A"}</strong>
-          </p>
           <div className="matches-layout">
             <div className="matches-layout__toolbar">
               <button
@@ -2574,52 +2825,105 @@ export default function App() {
               </button>
                 </div>
                 <section className="calendar-month">
-                  <div className="calendar-month__weekdays" aria-hidden>
-                    {["Mån", "Tis", "Ons", "Tor", "Fre", "Lör", "Sön"].map((w) => (
-                      <span key={w}>{w}</span>
-                    ))}
-                  </div>
-                  <div className="calendar-month__grid">
-                    {calendarMonthView.cells.map((day, i) => {
-                      if (!day) return <div key={`empty-${calendarMonthView.key}-${i}`} className="calendar-day calendar-day--empty" />;
-                      const dayMatches = calendarMonthView.matchesByDay.get(day) || [];
-                      return (
-                        <div key={`${calendarMonthView.key}-${day}`} className="calendar-day">
-                          <span className="calendar-day__date">{day}</span>
-                          <div className="calendar-day__matches">
-                            {dayMatches.map((m) => {
-                              const st = calendarStatus(m);
-                              const branchLabel = (m.branch || "p10") === "p11" ? "P11" : "P10";
-                              const opponent = calendarOpponentName(m);
-                              const oppLogo = calendarOpponentLogo(m);
-                              const hasUpdate = Boolean((m.note || "").trim()) || (m.comments || []).length > 0;
-                              return (
-                                <button
-                                  key={m.id}
-                                  type="button"
-                                  className={`calendar-event calendar-event--${branchLabel.toLowerCase()}${activeMatchId === m.id ? " calendar-event--active" : ""}`}
-                                  onClick={() => openMatchDetail(m.id)}
-                                  title={`Match ${m.number} · ${branchLabel} · ${opponent} · ${calendarTimeLabel(m)} · ${st.label}`}
-                                >
-                                  <div className="calendar-event__top">
-                                    <span className={`calendar-match__dot ${st.cls}`} aria-hidden />
-                                    <strong>{branchLabel}</strong>
-                                    {hasUpdate ? <span className="calendar-event__update">Notis</span> : null}
-                                  </div>
-                                  <div className="calendar-event__opponent">
-                                    <CalendarEventCrest name={oppLogo.name} logoUrl={oppLogo.logoUrl} />
-                                    <span>{opponent}</span>
-                                  </div>
-                                  <div className="calendar-event__time">
-                                    {calendarTimeLabel(m)}
-                                  </div>
-                                </button>
-                              );
-                            })}
+                  <ul className="calendar-month__agenda" aria-label="Matcher denna månad">
+                    {calendarMonthAgenda.length === 0 ? (
+                      <li className="calendar-agenda__empty">Inga matcher den här månaden.</li>
+                    ) : (
+                      calendarMonthAgenda.map((m) => {
+                        const st = calendarStatus(m);
+                        const branchLabel = (m.branch || "p10") === "p11" ? "P11" : "P10";
+                        const opponent = calendarOpponentName(m);
+                        const oppLogo = calendarOpponentLogo(m);
+                        const hasUpdate = Boolean((m.note || "").trim()) || (m.comments || []).length > 0;
+                        const dt = parseIsoDateLocal(m.fixture?.date);
+                        const dayNum = dt ? dt.getDate() : "";
+                        const dow = dt
+                          ? dt.toLocaleDateString("sv-SE", { weekday: "short" }).replace(/\.$/, "")
+                          : "";
+                        const monthShort = dt
+                          ? dt.toLocaleDateString("sv-SE", { month: "short" }).replace(/\.$/, "")
+                          : "";
+                        return (
+                          <li key={`agenda-${m.id}`}>
+                            <button
+                              type="button"
+                              className={`calendar-agenda__row calendar-agenda__row--${branchLabel.toLowerCase()}${activeMatchId === m.id ? " calendar-agenda__row--active" : ""}`}
+                              onClick={() => openMatchDetail(m.id)}
+                              aria-label={`Match ${m.number}, ${branchLabel}, mot ${opponent}, ${calendarTimeLabel(m)}, ${st.label}`}
+                            >
+                              <div className="calendar-agenda__date" aria-hidden>
+                                <span className="calendar-agenda__date-num">{dayNum}</span>
+                                <span className="calendar-agenda__date-meta">
+                                  {dow} {monthShort}
+                                </span>
+                              </div>
+                              <div className="calendar-agenda__body">
+                                <div className="calendar-agenda__top">
+                                  <span className={`calendar-match__dot ${st.cls}`} aria-hidden />
+                                  <strong>{branchLabel}</strong>
+                                  <span className="calendar-agenda__matchnr">#{m.number}</span>
+                                  {hasUpdate ? <span className="calendar-event__update">Notis</span> : null}
+                                </div>
+                                <div className="calendar-agenda__opponent">
+                                  <CalendarEventCrest name={oppLogo.name} logoUrl={oppLogo.logoUrl} />
+                                  <span>{opponent}</span>
+                                </div>
+                              </div>
+                              <div className="calendar-agenda__time">{calendarTimeLabel(m)}</div>
+                            </button>
+                          </li>
+                        );
+                      })
+                    )}
+                  </ul>
+                  <div className="calendar-month__desktop">
+                    <div className="calendar-month__weekdays" aria-hidden>
+                      {["Mån", "Tis", "Ons", "Tor", "Fre", "Lör", "Sön"].map((w) => (
+                        <span key={w}>{w}</span>
+                      ))}
+                    </div>
+                    <div className="calendar-month__grid">
+                      {calendarMonthView.cells.map((day, i) => {
+                        if (!day) return <div key={`empty-${calendarMonthView.key}-${i}`} className="calendar-day calendar-day--empty" />;
+                        const dayMatches = calendarMonthView.matchesByDay.get(day) || [];
+                        return (
+                          <div key={`${calendarMonthView.key}-${day}`} className="calendar-day">
+                            <span className="calendar-day__date">{day}</span>
+                            <div className="calendar-day__matches">
+                              {dayMatches.map((match) => {
+                                const st = calendarStatus(match);
+                                const branchLabel = (match.branch || "p10") === "p11" ? "P11" : "P10";
+                                const opponent = calendarOpponentName(match);
+                                const oppLogo = calendarOpponentLogo(match);
+                                const hasUpdate = Boolean((match.note || "").trim()) || (match.comments || []).length > 0;
+                                return (
+                                  <button
+                                    key={match.id}
+                                    type="button"
+                                    className={`calendar-event calendar-event--${branchLabel.toLowerCase()}${activeMatchId === match.id ? " calendar-event--active" : ""}`}
+                                    onClick={() => openMatchDetail(match.id)}
+                                    title={`Match ${match.number} · ${branchLabel} · ${opponent} · ${calendarTimeLabel(match)} · ${st.label}`}
+                                  >
+                                    <div className="calendar-event__top">
+                                      <span className={`calendar-match__dot ${st.cls}`} aria-hidden />
+                                      <strong>{branchLabel}</strong>
+                                      {hasUpdate ? <span className="calendar-event__update">Notis</span> : null}
+                                    </div>
+                                    <div className="calendar-event__opponent">
+                                      <CalendarEventCrest name={oppLogo.name} logoUrl={oppLogo.logoUrl} />
+                                      <span>{opponent}</span>
+                                    </div>
+                                    <div className="calendar-event__time">
+                                      {calendarTimeLabel(match)}
+                                    </div>
+                                  </button>
+                                );
+                              })}
+                            </div>
                           </div>
-                        </div>
-                      );
-                    })}
+                        );
+                      })}
+                    </div>
                   </div>
                 </section>
               </div>
@@ -2656,9 +2960,6 @@ export default function App() {
       {tab === "overview" && (
         <section className="panel" role="tabpanel" id="panel-overview" aria-labelledby="tab-overview">
           <h2 className="panel__title">Statistik</h2>
-          <p className="panel__lead">
-            Sortering: minst genomförda matcher först. Ålder: {seasonYear()} minus födelseår.
-          </p>
 
           <p className="overview-meta">
             <span>
