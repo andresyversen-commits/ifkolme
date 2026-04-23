@@ -1060,6 +1060,12 @@ body {
   overflow-x: hidden;
 }
 
+.lineup-panel * {
+  box-sizing: border-box;
+  max-width: 100%;
+  min-width: 0;
+}
+
 .lineup-formation-wrap {
   display: grid;
   grid-template-columns: 1fr;
@@ -1107,6 +1113,47 @@ body {
 
 .lineup-player-grid .field:last-child {
   margin-bottom: 0;
+}
+
+/* Hard fallback: never allow lineup controls to create horizontal pressure. */
+.lineup-panel .lineup-formation-grid,
+.lineup-panel .lineup-player-grid,
+.lineup-panel .lineup-formation-wrap {
+  display: block !important;
+  width: 100% !important;
+  max-width: 100% !important;
+  min-width: 0 !important;
+}
+
+.lineup-panel .lineup-formation-grid > *,
+.lineup-panel .lineup-player-grid > * {
+  display: block !important;
+  width: 100% !important;
+  max-width: 100% !important;
+  min-width: 0 !important;
+}
+
+.lineup-panel .field__input,
+.lineup-panel .field__select,
+.lineup-panel input[type="number"],
+.lineup-panel select,
+.lineup-panel button {
+  width: 100%;
+  max-width: 100%;
+}
+
+.lineup-panel .btn-row {
+  width: 100%;
+}
+
+.lineup-panel .btn-row .btn {
+  width: 100%;
+}
+
+.lineup-panel .lineup-dnd-help,
+.lineup-panel .text-muted {
+  overflow-wrap: anywhere;
+  word-break: break-word;
 }
 
 /* Laddning / tomt */

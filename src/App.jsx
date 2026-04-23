@@ -259,10 +259,12 @@ function CalendarEventCrest({ name, logoUrl }) {
 /** Seriekort (serie, tid, lag). */
 function MinFotbollFixture({ fixture, getStoredTeamLogo }) {
   if (!fixture) return null;
+  const homeTeam = String(fixture.home || fixture.homeTeam || "").trim();
+  const awayTeam = String(fixture.away || fixture.awayTeam || "").trim();
   const dateLabel = formatFixtureDateSv(fixture.date);
   const timeIsPlaceholder = fixture.time === "00:00";
-  const homeLogo = fixture.homeLogo || getStoredTeamLogo?.(fixture.home);
-  const awayLogo = fixture.awayLogo || getStoredTeamLogo?.(fixture.away);
+  const homeLogo = fixture.homeLogo || getStoredTeamLogo?.(homeTeam);
+  const awayLogo = fixture.awayLogo || getStoredTeamLogo?.(awayTeam);
   return (
     <div className="fixture-block">
       <header className="fixture-block__head">
@@ -271,8 +273,8 @@ function MinFotbollFixture({ fixture, getStoredTeamLogo }) {
       </header>
       <div className="fixture-block__row">
         <div className="fixture-block__side fixture-block__side--home">
-          <FixtureCrest name={fixture.home} logoUrl={homeLogo} />
-          <span className="fixture-block__club">{fixture.home}</span>
+          <FixtureCrest name={homeTeam} logoUrl={homeLogo} />
+          <span className="fixture-block__club">{homeTeam || "Hemmalag"}</span>
         </div>
         <div className="fixture-block__center">
           {fixture.venue ? <span className="fixture-block__venue">{fixture.venue}</span> : null}
@@ -284,8 +286,8 @@ function MinFotbollFixture({ fixture, getStoredTeamLogo }) {
           <span className="fixture-block__date">{dateLabel}</span>
         </div>
         <div className="fixture-block__side fixture-block__side--away">
-          <FixtureCrest name={fixture.away} logoUrl={awayLogo} />
-          <span className="fixture-block__club">{fixture.away}</span>
+          <FixtureCrest name={awayTeam} logoUrl={awayLogo} />
+          <span className="fixture-block__club">{awayTeam || "Bortalag"}</span>
         </div>
       </div>
     </div>
