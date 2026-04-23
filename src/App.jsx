@@ -1,0 +1,1643 @@
+import { useCallback, useEffect, useMemo, useState } from "react";
+import * as XLSX from "xlsx";
+import { useRegisterSW } from "virtual:pwa-register/react";
+import { Button } from "@/components/ui/button";
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import { resolveTeamLogoUrl, teamInitials } from "@/lib/teamLogos";
+import { matchSquadMode, p11Assist2016Count, compareMatchesChronologically } from "../selection.mjs";
+
+async function api(path, options = {}) {
+  const r = await fetch(path, {
+    headers: { "Content-Type": "application/json", ...options.headers },
+    ...options,
+    body: options.body ? JSON.stringify(options.body) : options.body,
+    cache: "no-store",
+  });
+  if (!r.ok) {
+    const ct = r.headers.get("content-type") || "";
+    if (ct.includes("application/json")) {
+      const j = await r.json().catch(() => ({}));
+      throw new Error(j.error || r.statusText);
+    }
+    const text = await r.text().catch(() => "");
+    const hint =
+      r.status === 404
+        ? " (troligen fel port eller backend körs inte – starta med npm run dev)"
+        : "";
+    throw new Error(
+      text.trim()
+        ? `${r.status} ${r.statusText}: ${text.slice(0, 200)}${hint}`
+        : `${r.status} ${r.statusText}${hint}`,
+    );
+  }
+  return r.json();
+}
+
+const TABS = [
+  { id: "players", label: "Spelargrupp" },
+  { id: "matches", label: "Matcher" },
+  { id: "overview", label: "Översikt" },
+];
+
+const LS_STATE_KEY = "lagval.state.v1";
+const LS_UI_KEY = "lagval.ui.v1";
+
+function seasonYear() {
+  return new Date().getFullYear();
+}
+
+function playerAge(birthYear) {
+  return seasonYear() - birthYear;
+}
+
+function groupLabelDisp(g) {
+  if (g === "A" || g === "B" || g === "C") return `Grupp ${g}`;
+  return "—";
+}
+
+function assignmentFromGroups2016(groups2016, groups2016Extra, players2016) {
+  const m = {};
+  for (const letter of ["A", "B", "C"]) {
+    for (const id of groups2016[letter] || []) m[id] = letter;
+  }
+  for (const id of groups2016Extra || []) m[id] = "X";
+  for (const p of players2016) {
+    if (!m[p.id]) m[p.id] = "A";
+  }
+  return m;
+}
+
+function formatFixtureDateSv(isoDate) {
+  if (!isoDate || typeof isoDate !== "string") return "—";
+  const parts = isoDate.split("-").map(Number);
+  if (parts.length !== 3 || parts.some((n) => Number.isNaN(n))) return isoDate;
+  const [y, mo, d] = parts;
+  const dt = new Date(y, mo - 1, d);
+  return dt.toLocaleDateString("sv-SE", { weekday: "short", day: "numeric", month: "short" });
+}
+
+function formatTimestampSv(iso) {
+  if (!iso) return "—";
+  const d = new Date(iso);
+  if (Number.isNaN(d.getTime())) return iso;
+  return d.toLocaleString("sv-SE", {
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+    hour: "2-digit",
+    minute: "2-digit",
+  });
+}
+
+/** Truppvisning: samma namn-/år-typografi som översikten, sorterat 2015 först. */
+function MatchLineupNames({ playerIds, players }) {
+  const rows = useMemo(() => {
+    return [...playerIds]
+      .map((id) => players.find((p) => p.id === id))
+      .filter(Boolean)
+      .sort((a, b) => {
+        if (a.birthYear !== b.birthYear) return (a.birthYear || 0) - (b.birthYear || 0);
+        return a.name.localeCompare(b.name, "sv");
+      });
+  }, [playerIds, players]);
+
+  if (!rows.length) return null;
+  return (
+    <ul className="lineup-list" aria-label="Trupp">
+      {rows.map((p) => (
+        <li key={p.id} className="lineup-list__row">
+          <span className="lineup-list__name">{p.name}</span>
+          <span className="lineup-list__year">{p.birthYear}</span>
+        </li>
+      ))}
+    </ul>
+  );
+}
+
+function FixtureCrest({ name, logoUrl }) {
+  const resolvedUrl = useMemo(
+    () => resolveTeamLogoUrl(name, logoUrl),
+    [name, logoUrl],
+  );
+  const [imgFailed, setImgFailed] = useState(false);
+
+  useEffect(() => {
+    setImgFailed(false);
+  }, [resolvedUrl]);
+
+  const showImage = Boolean(resolvedUrl) && !imgFailed;
+
+  return (
+    <div
+      className={`fixture-crest${showImage ? " fixture-crest--logo" : ""}`}
+      aria-hidden
+      data-team={name}
+    >
+      {showImage ? (
+        <img
+          className="fixture-crest__img"
+          src={resolvedUrl}
+          alt=""
+          onError={() => setImgFailed(true)}
+        />
+      ) : (
+        teamInitials(name || "")
+      )}
+    </div>
+  );
+}
+
+/** Seriekort (serie, tid, lag). */
+function MinFotbollFixture({ fixture }) {
+  if (!fixture) return null;
+  const dateLabel = formatFixtureDateSv(fixture.date);
+  const timeIsPlaceholder = fixture.time === "00:00";
+  return (
+    <div className="fixture-block">
+      <header className="fixture-block__head">
+        <span className="fixture-block__series">{fixture.series}</span>
+        {fixture.association ? <span className="fixture-block__assoc">{fixture.association}</span> : null}
+      </header>
+      <div className="fixture-block__row">
+        <div className="fixture-block__side fixture-block__side--home">
+          <FixtureCrest name={fixture.home} logoUrl={fixture.homeLogo} />
+          <span className="fixture-block__club">{fixture.home}</span>
+        </div>
+        <div className="fixture-block__center">
+          {fixture.venue ? <span className="fixture-block__venue">{fixture.venue}</span> : null}
+          {timeIsPlaceholder ? (
+            <span className="fixture-time-tbd">TBD</span>
+          ) : (
+            <span className="fixture-block__time">{fixture.time}</span>
+          )}
+          <span className="fixture-block__date">{dateLabel}</span>
+        </div>
+        <div className="fixture-block__side fixture-block__side--away">
+          <FixtureCrest name={fixture.away} logoUrl={fixture.awayLogo} />
+          <span className="fixture-block__club">{fixture.away}</span>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+/** Vilken A/B/C-lista en 2015-spelare tillhör (för visning på spelarkort). */
+function groupLetterFor2015Player(id, groups2015) {
+  if (!groups2015) return null;
+  for (const g of ["A", "B", "C"]) {
+    if ((groups2015[g] || []).includes(id)) return g;
+  }
+  return null;
+}
+
+function assignmentFromGroups(groups2015, players2015) {
+  const m = {};
+  for (const g of ["A", "B", "C"]) {
+    for (const id of groups2015[g] || []) m[id] = g;
+  }
+  for (const p of players2015) {
+    if (!m[p.id]) m[p.id] = "A";
+  }
+  return m;
+}
+
+function Groups2015Editor({ groups2015, players2015, load, setErr }) {
+  const [assign, setAssign] = useState({});
+
+  useEffect(() => {
+    if (!groups2015 || !players2015.length) return;
+    setAssign(assignmentFromGroups(groups2015, players2015));
+  }, [groups2015, players2015]);
+
+  const sorted2015 = useMemo(() => {
+    return [...players2015].sort((a, b) => {
+      const ga = assign[a.id] || "A";
+      const gb = assign[b.id] || "A";
+      if (ga !== gb) return ga.localeCompare(gb);
+      return a.name.localeCompare(b.name, "sv");
+    });
+  }, [players2015, assign]);
+
+  const namesInGroup = (letter) =>
+    players2015
+      .filter((p) => (assign[p.id] || "A") === letter)
+      .sort((a, b) => a.name.localeCompare(b.name, "sv"));
+
+  if (players2015.length !== 9) {
+    return (
+      <p className="empty-hint">
+        Exakt nio spelare födda 2015 krävs för att hantera grupperna A, B och C (tre per grupp).
+      </p>
+    );
+  }
+
+  return (
+    <div className="group-editor">
+      <p className="panel__lead" style={{ marginTop: 0 }}>
+        Tre per grupp. Spara efter ändring.
+      </p>
+
+      <div className="group-grid" aria-label="Översikt grupp A B C">
+        {["A", "B", "C"].map((letter) => (
+          <div key={letter} className="group-pillar">
+            <h4 className="group-pillar__title">Grupp {letter}</h4>
+            <ul>
+              {namesInGroup(letter).map((p) => (
+                <li key={p.id}>{p.name}</li>
+              ))}
+            </ul>
+          </div>
+        ))}
+      </div>
+
+      <h4 className="panel__title" style={{ fontSize: 15, margin: "16px 0 8px" }}>
+        Ändra grupper
+      </h4>
+      <div className="group-editor__table-wrap">
+        <table className="group-editor__table">
+          <thead>
+            <tr>
+              <th>Grupp</th>
+              <th>Spelare</th>
+            </tr>
+          </thead>
+          <tbody>
+            {sorted2015.map((p) => (
+              <tr key={p.id}>
+                <td style={{ width: 120 }}>
+                  <select
+                    className="field__select"
+                    style={{ maxWidth: "100%" }}
+                    value={assign[p.id] || "A"}
+                    onChange={(e) => setAssign((prev) => ({ ...prev, [p.id]: e.target.value }))}
+                  >
+                    <option value="A">A</option>
+                    <option value="B">B</option>
+                    <option value="C">C</option>
+                  </select>
+                </td>
+                <td>{p.name}</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+      <button
+        type="button"
+        className="btn btn--primary"
+        style={{ marginTop: 14 }}
+        onClick={async () => {
+          const A = [];
+          const B = [];
+          const C = [];
+          for (const p of players2015) {
+            const g = assign[p.id] || "A";
+            if (g === "A") A.push(p.id);
+            else if (g === "B") B.push(p.id);
+            else C.push(p.id);
+          }
+          if (A.length !== 3 || B.length !== 3 || C.length !== 3) {
+            setErr("Varje grupp måste ha exakt tre spelare.");
+            return;
+          }
+          setErr("");
+          try {
+            await api("/api/groups2015", { method: "PUT", body: { A, B, C } });
+            await load();
+          } catch (x) {
+            setErr(x.message);
+          }
+        }}
+      >
+        Spara grupper
+      </button>
+    </div>
+  );
+}
+
+function Groups2016Editor({ groups2016, groups2016Extra, players2016, load, setErr }) {
+  const [assign, setAssign] = useState({});
+
+  useEffect(() => {
+    if (!groups2016 || !players2016.length) return;
+    setAssign(assignmentFromGroups2016(groups2016, groups2016Extra, players2016));
+  }, [groups2016, groups2016Extra, players2016]);
+
+  const sorted2016 = useMemo(() => {
+    return [...players2016].sort((a, b) => {
+      const ga = assign[a.id] || "A";
+      const gb = assign[b.id] || "A";
+      if (ga !== gb) return ga.localeCompare(gb);
+      return a.name.localeCompare(b.name, "sv");
+    });
+  }, [players2016, assign]);
+
+  if (players2016.length < 9) {
+    return (
+      <p className="empty-hint">
+        Minst nio spelare födda 2016 krävs för rotationsgrupper A, B och C (tre per grupp). Övriga 2016 hamnar i
+        extra-listan när ni är tio eller fler.
+      </p>
+    );
+  }
+
+  return (
+    <div className="group-editor">
+      <p className="panel__lead" style={{ marginTop: 0 }}>
+        Tre per grupp A/B/C för rotation vid P 11 med 2016-assist. Övriga 2016: välj &quot;Extra&quot;. Spara efter
+        ändring.
+      </p>
+
+      <h4 className="panel__title" style={{ fontSize: 15, margin: "16px 0 8px" }}>
+        Ändra grupper (2016)
+      </h4>
+      <div className="group-editor__table-wrap">
+        <table className="group-editor__table">
+          <thead>
+            <tr>
+              <th>Grupp</th>
+              <th>Spelare</th>
+            </tr>
+          </thead>
+          <tbody>
+            {sorted2016.map((p) => (
+              <tr key={p.id}>
+                <td style={{ width: 120 }}>
+                  <select
+                    className="field__select"
+                    style={{ maxWidth: "100%" }}
+                    value={assign[p.id] || "A"}
+                    onChange={(e) => setAssign((prev) => ({ ...prev, [p.id]: e.target.value }))}
+                  >
+                    <option value="A">A</option>
+                    <option value="B">B</option>
+                    <option value="C">C</option>
+                    <option value="X">Extra</option>
+                  </select>
+                </td>
+                <td>{p.name}</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+      <button
+        type="button"
+        className="btn btn--primary"
+        style={{ marginTop: 14 }}
+        onClick={async () => {
+          const A = [];
+          const B = [];
+          const C = [];
+          const extra = [];
+          for (const p of players2016) {
+            const g = assign[p.id] || "A";
+            if (g === "A") A.push(p.id);
+            else if (g === "B") B.push(p.id);
+            else if (g === "C") C.push(p.id);
+            else extra.push(p.id);
+          }
+          if (A.length !== 3 || B.length !== 3 || C.length !== 3) {
+            setErr("Grupp A, B och C ska ha exakt tre spelare vardera. Övriga ska ligga under Extra.");
+            return;
+          }
+          setErr("");
+          try {
+            await api("/api/groups2016", { method: "PUT", body: { A, B, C, extra } });
+            await load();
+          } catch (x) {
+            setErr(x.message);
+          }
+        }}
+      >
+        Spara 2016-grupper
+      </button>
+    </div>
+  );
+}
+
+function MatchCard({
+  m,
+  rotationView,
+  players2015,
+  players2016,
+  state,
+  playerName,
+  load,
+  setErr,
+  groupsValid,
+  coachNames = [],
+  onCopied,
+  cardTitle = "Match",
+  displayNumber,
+}) {
+  const squadMode = matchSquadMode(m);
+  const series = typeof m.fixture?.series === "string" ? m.fixture.series : "";
+  const isP11Series = series.includes("P 11");
+  const assist2016Target = isP11Series ? p11Assist2016Count(m, state) : 0;
+  const n15 = m.selectedPlayerIds.filter((id) => players2015.some((p) => p.id === id)).length;
+  const n16 = m.selectedPlayerIds.length - n15;
+  const [showManual, setShowManual] = useState(false);
+  const [manualIds, setManualIds] = useState([]);
+  const [showManual2016, setShowManual2016] = useState(false);
+  const [manual2016Ids, setManual2016Ids] = useState([]);
+  const [assistDraft, setAssistDraft] = useState(() => String(m.fixture?.p11Assist2016 ?? 0));
+  const [commentName, setCommentName] = useState(() => coachNames[0] || "Jonas");
+  const [commentText, setCommentText] = useState("");
+
+  useEffect(() => {
+    setAssistDraft(String(m.fixture?.p11Assist2016 ?? 0));
+  }, [m.fixture?.p11Assist2016, m.id]);
+  useEffect(() => {
+    if (coachNames.length && !coachNames.includes(commentName)) {
+      setCommentName(coachNames[0]);
+    }
+  }, [coachNames, commentName]);
+
+  const toggle2015 = (id) => {
+    setManualIds((prev) => {
+      if (prev.includes(id)) return prev.filter((x) => x !== id);
+      if (prev.length >= 3) return prev;
+      return [...prev, id];
+    });
+  };
+
+  const atLimit = manualIds.length >= 3;
+
+  const toggle2016 = (id) => {
+    const max = assist2016Target;
+    if (max <= 0) return;
+    setManual2016Ids((prev) => {
+      if (prev.includes(id)) return prev.filter((x) => x !== id);
+      if (prev.length >= max) return prev;
+      return [...prev, id];
+    });
+  };
+
+  const p11Manual2016Ok = !showManual2016 || manual2016Ids.length === assist2016Target;
+  const matchNo = displayNumber ?? m.number;
+  const selectedRows = m.selectedPlayerIds
+    .map((id) => state.players.find((p) => p.id === id))
+    .filter(Boolean)
+    .sort((a, b) => {
+      if (a.birthYear !== b.birthYear) return a.birthYear - b.birthYear;
+      return a.name.localeCompare(b.name, "sv");
+    });
+  const names2015 = selectedRows.filter((p) => p.birthYear === 2015).map((p) => p.name);
+  const names2016 = selectedRows.filter((p) => p.birthYear === 2016).map((p) => p.name);
+
+  const copyTeam = async () => {
+    const lines = [];
+    lines.push(`${cardTitle} ${matchNo}`);
+    if (m.intendedGroup2015) lines.push(`Grupp: ${m.intendedGroup2015}`);
+    lines.push("");
+    lines.push("2015:");
+    if (names2015.length) lines.push(...names2015);
+    else lines.push("—");
+    lines.push("");
+    lines.push("2016:");
+    if (names2016.length) lines.push(...names2016);
+    else lines.push("—");
+    if (Array.isArray(m.comments) && m.comments.length) {
+      lines.push("");
+      lines.push("Kommentarer:");
+      for (const c of m.comments) lines.push(`- ${c.name} (${formatTimestampSv(c.timestamp)}): ${c.text}`);
+    }
+    await navigator.clipboard.writeText(lines.join("\n"));
+    setErr("");
+    if (typeof onCopied === "function") onCopied("Lag kopierat till urklipp.");
+  };
+
+  return (
+    <article className="match-card">
+      {m.fixture ? <MinFotbollFixture fixture={m.fixture} /> : null}
+      <div className="match-card__inner">
+      <div className="match-card__head match-card__headrow">
+        <h3 className="match-card__label">
+          {cardTitle} {matchNo}
+        </h3>
+        <div style={{ display: "flex", flexWrap: "wrap", alignItems: "center", gap: 8 }}>
+          {m.status === "played" ? (
+            <span className="badge badge--success">Genomförd</span>
+          ) : m.selectedPlayerIds?.length ? (
+            <span className="badge badge--info">Trupp vald</span>
+          ) : (
+            <span className="badge badge--muted">Kommande</span>
+          )}
+          {m.status === "played" && (
+            <button
+              type="button"
+              className="btn btn--plain"
+              style={{ minHeight: 36, fontSize: 15, padding: "6px 10px" }}
+              onClick={async () => {
+                if (
+                  !confirm(
+                    "Ångra match? Den tas bort från historiken som genomförd, matchräknare minskas för valda spelare och grupprotationen följer åter de kvarvarande genomförda matcherna."
+                  )
+                )
+                  return;
+                setErr("");
+                try {
+                  await api(`/api/matches/${m.id}/reopen`, { method: "POST" });
+                  await load();
+                } catch (x) {
+                  setErr(x.message);
+                }
+              }}
+            >
+              Ångra match
+            </button>
+          )}
+        </div>
+      </div>
+
+      {m.intendedGroup2015 && (
+        <p style={{ margin: "0 0 8px", fontSize: 15, fontWeight: 600 }}>
+          Grupp 2015 (rotation): {groupLabelDisp(m.intendedGroup2015)}
+        </p>
+      )}
+      {squadMode === "p11Mixed" && m.intendedGroup2016 && (
+        <p style={{ margin: "0 0 8px", fontSize: 15, fontWeight: 600 }}>
+          Grupp 2016 (rotation assist): {groupLabelDisp(m.intendedGroup2016)}
+        </p>
+      )}
+
+      <div className="match-card__body">
+        {m.selectedPlayerIds.length > 0 ? (
+          <>
+            <p className="match-card__lineup-meta">
+              <strong>{m.selectedPlayerIds.length}</strong> spelare
+              {(n15 > 0 || n16 > 0) && (
+                <span className="match-card__lineup-breakdown">
+                  {" "}
+                  ·{" "}
+                  {[n15 > 0 ? `${n15} födda 2015` : null, n16 > 0 ? `${n16} födda 2016` : null].filter(Boolean).join(" · ")}
+                </span>
+              )}
+            </p>
+            <MatchLineupNames playerIds={m.selectedPlayerIds} players={state.players} />
+          </>
+        ) : (
+          <p className="text-muted">Inget uttag</p>
+        )}
+      </div>
+
+      <div className="match-comments" aria-label="Kommentarer">
+        <h4 className="panel__title" style={{ fontSize: 15, margin: "0 0 8px" }}>
+          Kommentarer
+        </h4>
+        <div className="match-comments__form">
+          <select className="field__select" value={commentName} onChange={(e) => setCommentName(e.target.value)}>
+            {(coachNames.length ? coachNames : ["Jonas", "Per", "Anders", "Kim"]).map((n) => (
+              <option key={n} value={n}>
+                {n}
+              </option>
+            ))}
+          </select>
+          <textarea
+            className="field__input"
+            rows={3}
+            placeholder="Skriv kommentar"
+            value={commentText}
+            onChange={(e) => setCommentText(e.target.value)}
+          />
+          <button
+            type="button"
+            className="btn btn--secondary"
+            onClick={async () => {
+              const t = commentText.trim();
+              if (!t) return;
+              setErr("");
+              try {
+                await api(`/api/matches/${m.id}/comments`, {
+                  method: "POST",
+                  body: { name: commentName, text: t },
+                });
+                setCommentText("");
+                await load();
+              } catch (x) {
+                setErr(x.message);
+              }
+            }}
+          >
+            Lägg till kommentar
+          </button>
+        </div>
+        <div className="match-comments__list">
+          {(m.comments || []).length === 0 ? (
+            <p className="text-muted">Inga kommentarer.</p>
+          ) : (
+            (m.comments || []).map((c, i) => (
+              <p key={`${c.timestamp}-${i}`} className="match-comments__item">
+                <strong>{c.name}</strong> ({formatTimestampSv(c.timestamp)}): {c.text}
+              </p>
+            ))
+          )}
+        </div>
+      </div>
+
+      {m.status !== "played" && isP11Series && (
+        <div style={{ marginBottom: 12 }}>
+          <label style={{ fontSize: 15, display: "flex", flexWrap: "wrap", alignItems: "center", gap: 8 }}>
+            Antal födda 2016 (P 11-assist)
+            <input
+              type="number"
+              min={0}
+              max={20}
+              className="field__select"
+              style={{ width: 88 }}
+              value={assistDraft}
+              onChange={(e) => setAssistDraft(e.target.value)}
+              onBlur={async () => {
+                const n = Math.floor(Number(assistDraft));
+                const v = Number.isFinite(n) ? Math.max(0, Math.min(20, n)) : 0;
+                setAssistDraft(String(v));
+                setErr("");
+                try {
+                  await api(`/api/matches/${m.id}/fixture`, { method: "PUT", body: { p11Assist2016: v } });
+                  await load();
+                } catch (x) {
+                  setErr(x.message);
+                }
+              }}
+            />
+          </label>
+          <p style={{ margin: "6px 0 0", fontSize: 13, color: "var(--muted-foreground)" }}>
+            0 = endast 2015. När antalet är 1–20 föreslår appen nästa i kön utifrån 2016-grupper A/B/C. Spara genom att lämna fältet (blur) eller tryck Tab.
+          </p>
+        </div>
+      )}
+
+      {m.status !== "played" && squadMode === "mixed" && (
+        <div style={{ marginBottom: 12 }}>
+          <label className="cb-row" style={{ cursor: "pointer" }}>
+            <input
+              type="checkbox"
+              checked={showManual}
+              onChange={(e) => {
+                const on = e.target.checked;
+                setShowManual(on);
+                if (on && rotationView?.canonical2015Ids?.length) {
+                  const avail = rotationView.canonical2015Ids.filter((id) => {
+                    const pl = players2015.find((x) => x.id === id);
+                    return pl && pl.available !== false;
+                  });
+                  setManualIds(avail.length ? [...avail] : []);
+                } else if (!on) {
+                  setManualIds([]);
+                }
+              }}
+            />
+            <span style={{ fontSize: 15 }}>Manuellt urval 2015 (max 3)</span>
+          </label>
+          {showManual && (
+            <div className="cb-grid">
+              {players2015.map((p) => (
+                <label
+                  key={p.id}
+                  className="cb-row"
+                  style={{ cursor: p.available === false ? "not-allowed" : "pointer", opacity: p.available === false ? 0.45 : 1 }}
+                >
+                  <input
+                    type="checkbox"
+                    checked={manualIds.includes(p.id)}
+                    disabled={p.available === false || (!manualIds.includes(p.id) && atLimit)}
+                    onChange={() => {
+                      if (p.available === false) return;
+                      toggle2015(p.id);
+                    }}
+                  />
+                  <span>
+                    {p.name}{" "}
+                    <span style={{ color: "var(--text-secondary)" }}>({p.birthYear})</span>
+                    {p.available === false && (
+                      <span style={{ color: "var(--danger)", fontSize: 13 }}> · Ej tillgänglig</span>
+                    )}
+                  </span>
+                </label>
+              ))}
+            </div>
+          )}
+        </div>
+      )}
+
+      {m.status !== "played" && squadMode === "p11Mixed" && assist2016Target > 0 && (
+        <div style={{ marginBottom: 12 }}>
+          <label className="cb-row" style={{ cursor: "pointer" }}>
+            <input
+              type="checkbox"
+              checked={showManual2016}
+              onChange={(e) => {
+                const on = e.target.checked;
+                setShowManual2016(on);
+                if (on) {
+                  const avail = players2016.filter((pl) => pl.available !== false).map((pl) => pl.id);
+                  const canon = (rotationView?.canonical2016Ids || []).filter((id) => avail.includes(id));
+                  const rest = avail
+                    .filter((id) => !canon.includes(id))
+                    .sort((a, b) => playerName(a).localeCompare(playerName(b), "sv"));
+                  const seed = [...canon, ...rest].slice(0, assist2016Target);
+                  setManual2016Ids(seed.length ? seed : []);
+                } else {
+                  setManual2016Ids([]);
+                }
+              }}
+            />
+            <span style={{ fontSize: 15 }}>
+              Manuellt urval 2016 ({assist2016Target} spelare)
+            </span>
+          </label>
+          {showManual2016 && (
+            <div className="cb-grid">
+              {players2016.map((p) => (
+                <label
+                  key={p.id}
+                  className="cb-row"
+                  style={{ cursor: p.available === false ? "not-allowed" : "pointer", opacity: p.available === false ? 0.45 : 1 }}
+                >
+                  <input
+                    type="checkbox"
+                    checked={manual2016Ids.includes(p.id)}
+                    disabled={
+                      p.available === false ||
+                      (!manual2016Ids.includes(p.id) && manual2016Ids.length >= assist2016Target)
+                    }
+                    onChange={() => {
+                      if (p.available === false) return;
+                      toggle2016(p.id);
+                    }}
+                  />
+                  <span>
+                    {p.name}{" "}
+                    <span style={{ color: "var(--text-secondary)" }}>({p.birthYear})</span>
+                    {p.available === false && (
+                      <span style={{ color: "var(--danger)", fontSize: 13 }}> · Ej tillgänglig</span>
+                    )}
+                  </span>
+                </label>
+              ))}
+            </div>
+          )}
+        </div>
+      )}
+
+      <div className="match-card__actions">
+        <button
+          type="button"
+          className="btn btn--primary btn--block"
+          disabled={
+            m.status === "played" ||
+            groupsValid === false ||
+            (squadMode === "p11Mixed" && showManual2016 && !p11Manual2016Ok)
+          }
+          onClick={async () => {
+            setErr("");
+            try {
+              const body = {};
+              if (squadMode === "mixed" && showManual && manualIds.length) {
+                body.override2015PlayerIds = manualIds;
+              }
+              if (squadMode === "p11Mixed" && showManual2016 && manual2016Ids.length) {
+                body.override2016PlayerIds = manual2016Ids;
+              }
+              await api(`/api/matches/${m.id}/select`, {
+                method: "POST",
+                body: Object.keys(body).length ? body : undefined,
+              });
+              await load();
+            } catch (x) {
+              setErr(x.message);
+            }
+          }}
+        >
+          Välj lag
+        </button>
+        <button
+          type="button"
+          className="btn btn--secondary btn--block"
+          disabled={m.status === "played" || !m.selectedPlayerIds.length}
+          onClick={async () => {
+            setErr("");
+            try {
+              await api(`/api/matches/${m.id}/complete`, { method: "POST" });
+              await load();
+            } catch (x) {
+              setErr(x.message);
+            }
+          }}
+        >
+          Markera som genomförd
+        </button>
+        <button
+          type="button"
+          className="btn btn--secondary btn--block"
+          disabled={!m.selectedPlayerIds.length}
+          onClick={() => {
+            copyTeam().catch((e) => setErr(e.message));
+          }}
+        >
+          Kopiera lag
+        </button>
+      </div>
+      </div>
+    </article>
+  );
+}
+
+export default function App() {
+  const [state, setState] = useState(null);
+  const [err, setErr] = useState("");
+  const [okMsg, setOkMsg] = useState("");
+  const [loading, setLoading] = useState(true);
+  const [tab, setTab] = useState("players");
+  const [form, setForm] = useState({ name: "", birthYear: "2016" });
+  const [editingId, setEditingId] = useState(null);
+  const [editName, setEditName] = useState("");
+  const [editYear, setEditYear] = useState("2016");
+  const [overviewBirth, setOverviewBirth] = useState("all");
+  const [overviewAge, setOverviewAge] = useState("all");
+  /** Underflikar inom Spelargrupp: spelarlista eller grupper */
+  const [playerSubTab, setPlayerSubTab] = useState("players");
+  /** Underflikar inom Matcher: P10 / P11 */
+  const [activeMatchId, setActiveMatchId] = useState(null);
+  const [importing, setImporting] = useState(false);
+  const [deferredInstallPrompt, setDeferredInstallPrompt] = useState(null);
+  const [installHint, setInstallHint] = useState("");
+  const {
+    needRefresh: [needRefresh, setNeedRefresh],
+    updateServiceWorker,
+  } = useRegisterSW();
+
+  const load = useCallback(async () => {
+    setErr("");
+    const s = await api("/api/state");
+    setState(s);
+  }, []);
+
+  useEffect(() => {
+    try {
+      const cached = localStorage.getItem(LS_STATE_KEY);
+      if (cached) {
+        const parsed = JSON.parse(cached);
+        if (parsed && parsed.matches && parsed.players) {
+          setState(parsed);
+          setLoading(false);
+        }
+      }
+      const ui = localStorage.getItem(LS_UI_KEY);
+      if (ui) {
+        const parsedUi = JSON.parse(ui);
+        if (parsedUi?.tab) setTab(parsedUi.tab);
+        if (parsedUi?.playerSubTab) setPlayerSubTab(parsedUi.playerSubTab);
+        if (parsedUi?.overviewBirth) setOverviewBirth(parsedUi.overviewBirth);
+        if (parsedUi?.overviewAge) setOverviewAge(parsedUi.overviewAge);
+        if (parsedUi?.activeMatchId) setActiveMatchId(parsedUi.activeMatchId);
+      }
+    } catch {
+      // Ignorera trasig localStorage och fortsätt med API.
+    }
+    load().catch((e) => setErr(e.message)).finally(() => setLoading(false));
+  }, [load]);
+
+  useEffect(() => {
+    if (!state) return;
+    try {
+      localStorage.setItem(LS_STATE_KEY, JSON.stringify(state));
+    } catch {
+      // Ignorera quota/serialization-fel.
+    }
+  }, [state]);
+
+  useEffect(() => {
+    try {
+      localStorage.setItem(
+        LS_UI_KEY,
+        JSON.stringify({ tab, playerSubTab, overviewBirth, overviewAge, activeMatchId }),
+      );
+    } catch {
+      // Ignorera localStorage-fel.
+    }
+  }, [tab, playerSubTab, overviewBirth, overviewAge, activeMatchId]);
+
+  useEffect(() => {
+    if (!okMsg) return;
+    const t = setTimeout(() => setOkMsg(""), 1800);
+    return () => clearTimeout(t);
+  }, [okMsg]);
+
+  useEffect(() => {
+    const onBeforeInstall = (e) => {
+      e.preventDefault();
+      setDeferredInstallPrompt(e);
+      setInstallHint("");
+    };
+    window.addEventListener("beforeinstallprompt", onBeforeInstall);
+    return () => window.removeEventListener("beforeinstallprompt", onBeforeInstall);
+  }, []);
+
+  const playersSorted = state
+    ? [...state.players].sort((a, b) => {
+        if (a.matchesPlayed !== b.matchesPlayed) return a.matchesPlayed - b.matchesPlayed;
+        return a.name.localeCompare(b.name, "sv");
+      })
+    : [];
+
+  const uniqueAges = state
+    ? [...new Set(state.players.map((p) => playerAge(p.birthYear)))].sort((a, b) => a - b)
+    : [];
+
+  const playersOverview = playersSorted.filter((p) => {
+    if (overviewBirth !== "all" && p.birthYear !== Number(overviewBirth)) return false;
+    if (overviewAge !== "all" && playerAge(p.birthYear) !== Number(overviewAge)) return false;
+    return true;
+  });
+
+  const matchesCompleted = state ? state.matches.filter((m) => m.status === "played").length : 0;
+  const matchesTotal = state ? state.matches.length : 0;
+  const rotationView = state?.rotationView;
+
+  const matchesP10 = useMemo(() => {
+    const arr = (state?.matches || []).filter((m) => (m.branch || "p10") === "p10");
+    return [...arr].sort(compareMatchesChronologically);
+  }, [state?.matches]);
+
+  const matchesP11 = useMemo(() => {
+    const arr = (state?.matches || []).filter((m) => m.branch === "p11");
+    return [...arr].sort(compareMatchesChronologically);
+  }, [state?.matches]);
+  const matchesCalendar = useMemo(() => matchesP10.slice(0, 13), [matchesP10]);
+  const players2015 = useMemo(
+    () => (state?.players ? state.players.filter((p) => p.birthYear === 2015) : []),
+    [state?.players]
+  );
+  const players2016 = useMemo(
+    () => (state?.players ? state.players.filter((p) => p.birthYear === 2016) : []),
+    [state?.players]
+  );
+
+  const matchGroupsValid =
+    rotationView?.groupsValid !== false && rotationView?.groups2016Valid !== false;
+
+  const [simulation, setSimulation] = useState(null);
+  const coachNames = state?.coachNames || ["Jonas", "Per", "Anders", "Kim"];
+
+  useEffect(() => {
+    if (!matchesCalendar.length) return;
+    if (activeMatchId && matchesCalendar.some((m) => m.id === activeMatchId)) return;
+    setActiveMatchId(matchesCalendar[0].id);
+  }, [matchesCalendar, activeMatchId]);
+
+  function playerName(id) {
+    return state?.players.find((p) => p.id === id)?.name ?? id;
+  }
+  function calendarStatus(m) {
+    if (m.status === "played") return { label: "Spelad", cls: "calendar-match__dot--played" };
+    if ((m.selectedPlayerIds || []).length) return { label: "Lag valt", cls: "calendar-match__dot--selected" };
+    return { label: "Ej vald", cls: "calendar-match__dot--empty" };
+  }
+
+  async function installApp() {
+    if (deferredInstallPrompt) {
+      deferredInstallPrompt.prompt();
+      await deferredInstallPrompt.userChoice.catch(() => null);
+      setDeferredInstallPrompt(null);
+      return;
+    }
+    const ua = navigator.userAgent.toLowerCase();
+    const isIos = /iphone|ipad|ipod/.test(ua);
+    if (isIos) {
+      setInstallHint("Tryck på dela → Lägg till på hemskärmen");
+    } else {
+      setInstallHint("Tryck på meny → Installera app");
+    }
+  }
+
+  function downloadBlob(filename, blob) {
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = filename;
+    a.click();
+    URL.revokeObjectURL(url);
+  }
+
+  function exportBackup() {
+    if (!state) return;
+    const date = new Date().toISOString().slice(0, 10);
+    const base = `fotboll_backup_${date}`;
+
+    const jsonBlob = new Blob([JSON.stringify(state, null, 2)], { type: "application/json;charset=utf-8" });
+    downloadBlob(`${base}.json`, jsonBlob);
+
+    const wsPlayers = XLSX.utils.json_to_sheet(
+      (state.players || []).map((p) => ({
+        Namn: p.name,
+        "Födelseår": p.birthYear,
+        "Antal matcher": p.matchesPlayed,
+        "Senast spelad match": p.lastPlayedMatchNumber ?? "—",
+      })),
+    );
+    const wsMatches = XLSX.utils.json_to_sheet(
+      (state.matches || []).map((m) => ({
+        Match: m.matchNumber ?? m.number,
+        "Grupp (2015)": m.group2015 ?? m.intendedGroup2015 ?? "—",
+        "Spelare valda": (m.selectedPlayers || m.selectedPlayerIds || []).length,
+        Status: m.status === "played" ? "Spelad" : (m.selectedPlayerIds || []).length ? "Lag valt" : "Ej vald",
+      })),
+    );
+    const commentRows = [];
+    for (const m of state.matches || []) {
+      for (const c of m.comments || []) {
+        commentRows.push({
+          Match: m.matchNumber ?? m.number,
+          Namn: c.name,
+          Kommentar: c.text,
+          Tid: formatTimestampSv(c.timestamp),
+        });
+      }
+    }
+    const wsComments = XLSX.utils.json_to_sheet(commentRows);
+
+    const wb = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(wb, wsPlayers, "Spelare");
+    XLSX.utils.book_append_sheet(wb, wsMatches, "Matcher");
+    XLSX.utils.book_append_sheet(wb, wsComments, "Kommentarer");
+    const xlsxArray = XLSX.write(wb, { bookType: "xlsx", type: "array" });
+    const xlsxBlob = new Blob([xlsxArray], {
+      type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+    });
+    downloadBlob(`${base}.xlsx`, xlsxBlob);
+    setOkMsg("Backup exporterad (JSON + Excel).");
+  }
+
+  async function importBackupFile(file) {
+    if (!file) return;
+    const ok = confirm("Detta ersätter all data. Vill du fortsätta?");
+    if (!ok) return;
+    setErr("");
+    setImporting(true);
+    try {
+      const text = await file.text();
+      let parsed;
+      try {
+        parsed = JSON.parse(text);
+      } catch {
+        throw new Error("Ogiltig JSON-fil.");
+      }
+      const next = await api("/api/state/import", { method: "POST", body: parsed });
+      setState(next);
+      setOkMsg("Backup importerad.");
+    } catch (e) {
+      setErr(e.message || "Kunde inte importera backup.");
+    } finally {
+      setImporting(false);
+    }
+  }
+
+  if (loading) {
+    return (
+      <div className="app app-state" role="status" aria-live="polite">
+        <div className="spinner" aria-hidden />
+        <p className="app-state__title">Laddar…</p>
+      </div>
+    );
+  }
+
+  if (!state) {
+    return (
+      <div className="app app-state">
+        <p className="app-state__title">Kunde inte läsa data</p>
+        <p>Försök ladda om sidan.</p>
+      </div>
+    );
+  }
+
+  return (
+    <div className="app">
+      <header className="app-header">
+        <h1 className="app-title">Lagval</h1>
+        <p className="app-footnote">Olme IF · ungdom</p>
+      </header>
+
+      {err && (
+        <div className="banner banner--error" role="alert">
+          {err}
+        </div>
+      )}
+      {okMsg && (
+        <div className="banner banner--ok" role="status">
+          {okMsg}
+        </div>
+      )}
+      {needRefresh && (
+        <div className="banner banner--ok" role="status">
+          Ny version tillgänglig.
+          <button
+            type="button"
+            className="btn btn--secondary"
+            style={{ marginLeft: 10 }}
+            onClick={() => {
+              updateServiceWorker(true);
+              setNeedRefresh(false);
+            }}
+          >
+            Uppdatera
+          </button>
+        </div>
+      )}
+
+      <div className="segmented" role="tablist" aria-label="Huvudnavigering">
+        {TABS.map((t) => (
+          <button
+            key={t.id}
+            type="button"
+            role="tab"
+            aria-selected={tab === t.id}
+            id={`tab-${t.id}`}
+            aria-controls={`panel-${t.id}`}
+            className="segmented__btn"
+            onClick={() => setTab(t.id)}
+          >
+            {t.label}
+          </button>
+        ))}
+      </div>
+      <div className="btn-row" style={{ marginTop: -8, marginBottom: 12 }}>
+        <button type="button" className="btn btn--secondary" onClick={() => installApp().catch(() => null)}>
+          Installera app
+        </button>
+      </div>
+      {installHint ? (
+        <div className="banner banner--ok" role="status" style={{ marginTop: -6 }}>
+          {installHint}
+        </div>
+      ) : null}
+
+      {tab === "players" && (
+        <section className="panel" role="tabpanel" id="panel-players" aria-labelledby="tab-players">
+          <h2 className="panel__title">Spelargrupp</h2>
+          <p className="panel__lead">
+            Spelare, grupper A/B/C för födda 2015 och 2016 (rotation). P 10-matcher: tre 2015 + alla tillgängliga
+            2016. Frånvaro: markera ej tillgänglig.
+          </p>
+
+          {rotationView && rotationView.groupsValid === false && (
+            <div className="callout callout--muted" role="status">
+              <strong>Ogiltiga 2015-grupper.</strong> Välj fliken <strong>Grupper</strong> och fördela exakt tre
+              spelare i A, B och C, sedan spara — eller åtgärda antalet födda 2015.
+            </div>
+          )}
+          {rotationView && rotationView.groups2016Valid === false && (
+            <div className="callout callout--muted" role="status">
+              <strong>Ogiltiga 2016-grupper.</strong> Öppna <strong>Grupper</strong> och spara A/B/C (tre per grupp)
+              samt Extra för övriga födda 2016.
+            </div>
+          )}
+
+          <div className="segmented segmented--nested" role="tablist" aria-label="Spelargrupp undermeny">
+            <button
+              type="button"
+              role="tab"
+              className="segmented__btn"
+              aria-selected={playerSubTab === "players"}
+              onClick={() => setPlayerSubTab("players")}
+            >
+              Spelare
+            </button>
+            <button
+              type="button"
+              role="tab"
+              className="segmented__btn"
+              aria-selected={playerSubTab === "groups"}
+              onClick={() => setPlayerSubTab("groups")}
+            >
+              Grupper
+            </button>
+          </div>
+
+          {playerSubTab === "players" && (
+            <>
+              <form
+                className="form-add"
+                onSubmit={async (e) => {
+                  e.preventDefault();
+                  setErr("");
+                  try {
+                    await api("/api/players", {
+                      method: "POST",
+                      body: { name: form.name, birthYear: Number(form.birthYear) },
+                    });
+                    setForm({ name: "", birthYear: form.birthYear });
+                    await load();
+                  } catch (x) {
+                    setErr(x.message);
+                  }
+                }}
+              >
+                <div className="field">
+                  <span className="field__label">Namn</span>
+                  <input
+                    className="field__input"
+                    value={form.name}
+                    onChange={(e) => setForm((f) => ({ ...f, name: e.target.value }))}
+                    required
+                    autoComplete="name"
+                    enterKeyHint="done"
+                  />
+                </div>
+                <div className="field">
+                  <span className="field__label">Födelseår</span>
+                  <select
+                    className="field__select"
+                    value={form.birthYear}
+                    onChange={(e) => setForm((f) => ({ ...f, birthYear: e.target.value }))}
+                  >
+                    <option value="2015">2015</option>
+                    <option value="2016">2016</option>
+                  </select>
+                </div>
+                <button type="submit" className="btn btn--primary">
+                  Lägg till spelare
+                </button>
+              </form>
+
+              <div className="players-table-wrap" style={{ marginTop: 16 }}>
+                <table className="players-table">
+                  <thead>
+                    <tr>
+                      <th>Namn</th>
+                      <th>År</th>
+                      <th>Grupp</th>
+                      <th>Matcher</th>
+                      <th>Senast</th>
+                      <th>Status</th>
+                      <th className="actions-cell" />
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {[...state.players]
+                      .sort((a, b) => {
+                        if (a.birthYear !== b.birthYear) return a.birthYear - b.birthYear;
+                        return a.name.localeCompare(b.name, "sv");
+                      })
+                      .map((p) => {
+                        const gLet = p.birthYear === 2015 ? groupLetterFor2015Player(p.id, state.groups2015) : null;
+                        if (editingId === p.id) {
+                          return (
+                            <tr key={p.id} className="players-table__edit">
+                              <td colSpan={7} style={{ padding: "12px 14px", background: "var(--fill-secondary)" }}>
+                                <div className="form-add" style={{ marginBottom: 0 }}>
+                                  <div className="field">
+                                    <span className="field__label">Namn</span>
+                                    <input
+                                      className="field__input"
+                                      value={editName}
+                                      onChange={(e) => setEditName(e.target.value)}
+                                    />
+                                  </div>
+                                  <div className="field">
+                                    <span className="field__label">Födelseår</span>
+                                    <select
+                                      className="field__select"
+                                      value={editYear}
+                                      onChange={(e) => setEditYear(e.target.value)}
+                                    >
+                                      <option value="2015">2015</option>
+                                      <option value="2016">2016</option>
+                                    </select>
+                                  </div>
+                                </div>
+                                <div className="btn-row" style={{ marginTop: 10 }}>
+                                  <button
+                                    type="button"
+                                    className="btn btn--primary btn--table"
+                                    onClick={async () => {
+                                      setErr("");
+                                      try {
+                                        await api(`/api/players/${p.id}`, {
+                                          method: "PUT",
+                                          body: { name: editName, birthYear: Number(editYear) },
+                                        });
+                                        setEditingId(null);
+                                        await load();
+                                      } catch (x) {
+                                        setErr(x.message);
+                                      }
+                                    }}
+                                  >
+                                    Spara
+                                  </button>
+                                  <button
+                                    type="button"
+                                    className="btn btn--secondary btn--table"
+                                    onClick={() => setEditingId(null)}
+                                  >
+                                    Avbryt
+                                  </button>
+                                </div>
+                              </td>
+                            </tr>
+                          );
+                        }
+                        return (
+                          <tr key={p.id}>
+                            <td className="players-table__name" data-label="Namn">
+                              {p.name}
+                            </td>
+                            <td data-label="År">{p.birthYear}</td>
+                            <td data-label="Grupp">{p.birthYear === 2015 ? (gLet ? gLet : "—") : "—"}</td>
+                            <td data-label="Matcher">{p.matchesPlayed}</td>
+                            <td data-label="Senast">{p.lastPlayedMatchNumber != null ? p.lastPlayedMatchNumber : "—"}</td>
+                            <td data-label="Status">
+                              {p.available === false ? (
+                                <span className="badge-avail badge-avail--no">Ej tillgänglig</span>
+                              ) : (
+                                <span className="badge-avail badge-avail--ok">Tillgänglig</span>
+                              )}
+                            </td>
+                            <td className="actions-cell">
+                              <div className="actions-inner">
+                                <button
+                                  type="button"
+                                  className="btn btn--secondary btn--table"
+                                  onClick={async () => {
+                                    setErr("");
+                                    const cur = p.available !== false;
+                                    try {
+                                      await api(`/api/players/${p.id}`, {
+                                        method: "PUT",
+                                        body: { available: !cur },
+                                      });
+                                      await load();
+                                    } catch (x) {
+                                      setErr(x.message);
+                                    }
+                                  }}
+                                >
+                                  {p.available === false ? "Tillgänglig" : "Frånvaro"}
+                                </button>
+                                <button
+                                  type="button"
+                                  className="btn btn--secondary btn--table"
+                                  onClick={() => {
+                                    setEditingId(p.id);
+                                    setEditName(p.name);
+                                    setEditYear(String(p.birthYear));
+                                  }}
+                                >
+                                  Redigera
+                                </button>
+                                <button
+                                  type="button"
+                                  className="btn btn--danger btn--table"
+                                  onClick={async () => {
+                                    if (!confirm(`Ta bort ${p.name}?`)) return;
+                                    setErr("");
+                                    try {
+                                      await api(`/api/players/${p.id}`, { method: "DELETE" });
+                                      await load();
+                                    } catch (x) {
+                                      setErr(x.message);
+                                    }
+                                  }}
+                                >
+                                  Ta bort
+                                </button>
+                              </div>
+                            </td>
+                          </tr>
+                        );
+                      })}
+                  </tbody>
+                </table>
+              </div>
+            </>
+          )}
+
+          {playerSubTab === "groups" && (
+            <div role="tabpanel" aria-label="Grupper">
+              <h3 className="panel__title" style={{ fontSize: 17, marginTop: 0 }}>
+                Grupper
+              </h3>
+              <h4 className="panel__title" style={{ fontSize: 16, margin: "12px 0 8px" }}>
+                Födda 2015
+              </h4>
+              <Groups2015Editor
+                groups2015={state.groups2015}
+                players2015={players2015}
+                load={load}
+                setErr={setErr}
+              />
+              <h4 className="panel__title" style={{ fontSize: 16, margin: "24px 0 8px" }}>
+                Födda 2016
+              </h4>
+              <Groups2016Editor
+                groups2016={state.groups2016}
+                groups2016Extra={state.groups2016Extra ?? []}
+                players2016={players2016}
+                load={load}
+                setErr={setErr}
+              />
+            </div>
+          )}
+        </section>
+      )}
+
+      {tab === "matches" && (
+        <section className="panel matches-page" role="tabpanel" id="panel-matches" aria-labelledby="tab-matches">
+          <h2 className="panel__title">Matcher</h2>
+
+          {rotationView && rotationView.groupsValid === false && (
+            <div className="banner banner--error" role="status">
+              Ogiltiga 2015-grupper — öppna <strong>Spelargrupp</strong> och spara A/B/C.
+            </div>
+          )}
+          {rotationView && rotationView.groups2016Valid === false && (
+            <div className="banner banner--error" role="status">
+              Ogiltiga 2016-grupper — öppna <strong>Spelargrupp → Grupper</strong> och spara A/B/C/Extra.
+            </div>
+          )}
+
+          <p className="panel__lead" style={{ marginTop: 0 }}>
+            Nästa grupp i tur: <strong>{rotationView?.nextGroupLabel ?? "Grupp A"}</strong>
+          </p>
+          <div className="calendar-grid" aria-label="Matchkalender">
+            {matchesCalendar.map((m) => {
+              const st = calendarStatus(m);
+              return (
+                <button
+                  key={m.id}
+                  type="button"
+                  className={`calendar-match${activeMatchId === m.id ? " calendar-match--active" : ""}`}
+                  onClick={() => setActiveMatchId(m.id)}
+                >
+                  <div className="calendar-match__head">
+                    <strong>Match {m.number}</strong>
+                    <span className={`calendar-match__dot ${st.cls}`} aria-hidden />
+                  </div>
+                  <p className="calendar-match__status">{st.label}</p>
+                  <p className="calendar-match__meta">Grupp: {m.intendedGroup2015 || "—"}</p>
+                  <p className="calendar-match__meta">Spelare: {(m.selectedPlayerIds || []).length}</p>
+                </button>
+              );
+            })}
+          </div>
+
+          {matchesCalendar.find((m) => m.id === activeMatchId) ? (
+            <div className="section-spacer" style={{ marginTop: 14 }}>
+              <MatchCard
+                m={matchesCalendar.find((m) => m.id === activeMatchId)}
+                rotationView={rotationView}
+                players2015={players2015}
+                players2016={players2016}
+                state={state}
+                playerName={playerName}
+                load={load}
+                setErr={setErr}
+                groupsValid={matchGroupsValid}
+                coachNames={coachNames}
+                onCopied={setOkMsg}
+                cardTitle="Match"
+                displayNumber={matchesCalendar.find((m) => m.id === activeMatchId)?.number}
+              />
+            </div>
+          ) : null}
+        </section>
+      )}
+
+      {tab === "overview" && (
+        <section className="panel" role="tabpanel" id="panel-overview" aria-labelledby="tab-overview">
+          <h2 className="panel__title">Översikt</h2>
+          <p className="panel__lead">
+            Sortering: minst genomförda matcher först. Ålder: {seasonYear()} minus födelseår.
+          </p>
+
+          <p className="overview-meta">
+            <span>
+              Genomförda matcher: <strong>{matchesCompleted}</strong> / {matchesTotal}
+            </span>
+            <span>
+              Visar <strong>{playersOverview.length}</strong> av {playersSorted.length} spelare
+            </span>
+          </p>
+
+          <div className="filter-block">
+            <span className="filter-block__label">Lag / födelseår</span>
+            <div className="segmented segmented--filter" role="group" aria-label="Filtrera på födelseår">
+              {[
+                { id: "all", label: "Båda" },
+                { id: "2015", label: "2015" },
+                { id: "2016", label: "2016" },
+              ].map((o) => (
+                <button
+                  key={o.id}
+                  type="button"
+                  className="segmented__btn"
+                  aria-selected={overviewBirth === o.id}
+                  onClick={() => setOverviewBirth(o.id)}
+                >
+                  {o.label}
+                </button>
+              ))}
+            </div>
+          </div>
+
+          <div className="filter-block">
+            <span className="filter-block__label">Ålder ({seasonYear()})</span>
+            <div className="segmented segmented--filter segmented--scroll" role="group" aria-label="Filtrera på ålder">
+              <button
+                type="button"
+                className="segmented__btn"
+                aria-selected={overviewAge === "all"}
+                onClick={() => setOverviewAge("all")}
+              >
+                Alla
+              </button>
+              {uniqueAges.map((a) => (
+                <button
+                  key={a}
+                  type="button"
+                  className="segmented__btn"
+                  aria-selected={overviewAge === String(a)}
+                  onClick={() => setOverviewAge(String(a))}
+                >
+                  {a} år
+                </button>
+              ))}
+            </div>
+          </div>
+
+          {playersOverview.length === 0 ? (
+            <p className="empty-hint">Inga spelare matchar filtren.</p>
+          ) : (
+            <div className="stat-list stat-list--4col">
+              <div className="stat-head" aria-hidden>
+                <span>Namn</span>
+                <span>År</span>
+                <span>Antal matcher</span>
+                <span>Senast</span>
+              </div>
+              {playersOverview.map((p) => (
+                <div key={p.id} className="stat-row">
+                  <p className="stat-row__name">
+                    {p.name}
+                    <span style={{ fontWeight: 400, color: "var(--text-secondary)", fontSize: 14 }}>
+                      {" "}
+                      · {playerAge(p.birthYear)} år
+                    </span>
+                  </p>
+                  <span className="stat-row__year">{p.birthYear}</span>
+                  <span className="stat-row__value">{p.matchesPlayed}</span>
+                  <span className="stat-row__last">{p.lastPlayedMatchNumber != null ? p.lastPlayedMatchNumber : "—"}</span>
+                </div>
+              ))}
+            </div>
+          )}
+
+          <div className="section-spacer" style={{ marginTop: 20 }}>
+            <div className="btn-row" style={{ marginBottom: 10 }}>
+              <button type="button" className="btn btn--secondary btn--block" onClick={exportBackup}>
+                Exportera data
+              </button>
+              <label className="btn btn--secondary btn--block" style={{ cursor: importing ? "wait" : "pointer" }}>
+                Importera data
+                <input
+                  type="file"
+                  accept="application/json,.json"
+                  style={{ display: "none" }}
+                  disabled={importing}
+                  onChange={(e) => {
+                    const file = e.target.files?.[0];
+                    importBackupFile(file);
+                    e.target.value = "";
+                  }}
+                />
+              </label>
+            </div>
+            <button
+              type="button"
+              className="btn btn--danger btn--block"
+              onClick={async () => {
+                if (
+                  !confirm(
+                    "Återställa säsongen? Alla matcher och matchräknare nollställs, alla spelare markeras som tillgängliga och nästa grupp blir A (ingen genomförd match)."
+                  )
+                )
+                  return;
+                setErr("");
+                try {
+                  await api("/api/reset-season", { method: "POST" });
+                  await load();
+                } catch (x) {
+                  setErr(x.message);
+                }
+              }}
+            >
+              Återställ säsong
+            </button>
+          </div>
+        </section>
+      )}
+    </div>
+  );
+}

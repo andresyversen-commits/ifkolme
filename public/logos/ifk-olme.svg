@@ -1,0 +1,17 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 72" width="64" height="72" role="img" aria-label="IFK &#x00D6;lme">
+  <defs>
+    <linearGradient id="s" x1="0%" y1="0%" x2="0%" y2="100%">
+      <stop offset="0%" style="stop-color:#2563eb"/>
+      <stop offset="100%" style="stop-color:#1e3a8a"/>
+    </linearGradient>
+  </defs>
+  <path
+    d="M32 3 L57 14 L57 35 Q57 50 32 69 Q7 50 7 35 L7 14 Z"
+    fill="url(#s)"
+    stroke="#bfdbfe"
+    stroke-width="1.5"
+  />
+  <text x="32" y="30" text-anchor="middle" fill="#ffffff" font-size="11" font-family="system-ui, -apple-system, sans-serif" font-weight="800" letter-spacing="0.06em">IFK</text>
+  <text x="32" y="48" text-anchor="middle" fill="#e0e7ff" font-size="13" font-family="system-ui, -apple-system, sans-serif" font-weight="700">&#x00D6;lme</text>
+</svg>
