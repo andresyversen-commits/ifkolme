@@ -50,6 +50,8 @@ const TABS = [
 
 const LS_STATE_KEY = "lagval.state.v1";
 const LS_UI_KEY = "lagval.ui.v1";
+const DEFAULT_MINFOTBOLL_ICS_URL =
+  "webcal://minfotboll-api.azurewebsites.net/api/ExternalCalendarAPI/GetMemberCalendar/dmJFMkpKuMBlDjjZjRJNMKsxWnquLwbT.ics";
 
 function seasonYear() {
   return new Date().getFullYear();
@@ -938,6 +940,8 @@ export default function App() {
   const [importing, setImporting] = useState(false);
   const [deferredInstallPrompt, setDeferredInstallPrompt] = useState(null);
   const [installHint, setInstallHint] = useState("");
+  const [icsUrl, setIcsUrl] = useState(DEFAULT_MINFOTBOLL_ICS_URL);
+  const [syncingIcs, setSyncingIcs] = useState(false);
   const {
     needRefresh: [needRefresh, setNeedRefresh],
     updateServiceWorker,
@@ -977,6 +981,7 @@ export default function App() {
         if (parsedUi?.overviewBirth) setOverviewBirth(parsedUi.overviewBirth);
         if (parsedUi?.overviewAge) setOverviewAge(parsedUi.overviewAge);
         if (parsedUi?.activeMatchId) setActiveMatchId(parsedUi.activeMatchId);
+        if (parsedUi?.icsUrl) setIcsUrl(parsedUi.icsUrl);
       }
     } catch {
       // Ignorera trasig localStorage och fortsätt med API.
@@ -1023,12 +1028,12 @@ export default function App() {
     try {
       localStorage.setItem(
         LS_UI_KEY,
-        JSON.stringify({ tab, playerSubTab, overviewBirth, overviewAge, activeMatchId }),
+        JSON.stringify({ tab, playerSubTab, overviewBirth, overviewAge, activeMatchId, icsUrl }),
       );
     } catch {
       // Ignorera localStorage-fel.
     }
-  }, [tab, playerSubTab, overviewBirth, overviewAge, activeMatchId]);
+  }, [tab, playerSubTab, overviewBirth, overviewAge, activeMatchId, icsUrl]);
 
   useEffect(() => {
     if (!okMsg) return;
@@ -1073,15 +1078,6 @@ export default function App() {
   const matchesTotal = state ? state.matches.length : 0;
   const rotationView = state?.rotationView;
 
-  const matchesP10 = useMemo(() => {
-    const arr = (state?.matches || []).filter((m) => (m.branch || "p10") === "p10");
-    return [...arr].sort(compareMatchesChronologically);
-  }, [state?.matches]);
-
-  const matchesP11 = useMemo(() => {
-    const arr = (state?.matches || []).filter((m) => m.branch === "p11");
-    return [...arr].sort(compareMatchesChronologically);
-  }, [state?.matches]);
   const matchesCalendar = useMemo(() => {
     const arr = (state?.matches || []).filter((m) => parseIsoDateLocal(m.fixture?.date));
     return [...arr].sort(compareMatchesChronologically);
@@ -1183,8 +1179,8 @@ export default function App() {
   }
 
   function calendarOpponentName(m) {
-    const home = m.fixture?.homeTeam || "";
-    const away = m.fixture?.awayTeam || "";
+    const home = m.fixture?.home || m.fixture?.homeTeam || "";
+    const away = m.fixture?.away || m.fixture?.awayTeam || "";
     if (!home && !away) return "Motståndare saknas";
     if (/ifk\s*ölme/i.test(home) || /ifk\s*olme/i.test(home)) return away || home;
     if (/ifk\s*ölme/i.test(away) || /ifk\s*olme/i.test(away)) return home || away;
@@ -1214,6 +1210,29 @@ export default function App() {
       setInstallHint("Tryck på dela → Lägg till på hemskärmen");
     } else {
       setInstallHint("Tryck på meny → Installera app");
+    }
+  }
+
+  async function syncFromMinFotboll() {
+    setErr("");
+    setSyncingIcs(true);
+    try {
+      const next = await api("/api/fixtures/sync-ics", {
+        method: "POST",
+        body: { url: icsUrl },
+      });
+      setState(next);
+      const updated = Number(next?.sync?.updatedMatches || 0);
+      const parsed = Number(next?.sync?.parsedEvents || 0);
+      setOkMsg(`MinFotboll synkad: ${updated} matcher uppdaterade (${parsed} händelser lästa).`);
+      if (next?.matches?.length) {
+        const activeExists = next.matches.some((m) => m.id === activeMatchId);
+        if (!activeExists) setActiveMatchId(next.matches[0].id);
+      }
+    } catch (e) {
+      setErr(e.message);
+    } finally {
+      setSyncingIcs(false);
     }
   }
 
@@ -1678,6 +1697,32 @@ export default function App() {
           <p className="panel__lead" style={{ marginTop: 0 }}>
             Nästa grupp i tur: <strong>{rotationView?.nextGroupLabel ?? "Grupp A"}</strong>
           </p>
+          <div className="group" style={{ padding: 12, marginBottom: 12 }}>
+            <p className="panel__lead" style={{ margin: "0 0 8px" }}>
+              MinFotboll-koppling (ICS)
+            </p>
+            <div className="field" style={{ marginBottom: 8 }}>
+              <label className="field__label" htmlFor="ics-url">
+                Kalenderlänk
+              </label>
+              <input
+                id="ics-url"
+                className="field__input"
+                type="text"
+                value={icsUrl}
+                onChange={(e) => setIcsUrl(e.target.value)}
+                placeholder="webcal://... eller https://..."
+              />
+            </div>
+            <button
+              type="button"
+              className="btn btn--secondary"
+              onClick={() => syncFromMinFotboll().catch(() => null)}
+              disabled={syncingIcs}
+            >
+              {syncingIcs ? "Synkar..." : "Synka MinFotboll"}
+            </button>
+          </div>
           <h3 className="panel__title" style={{ fontSize: 17, margin: "0 0 8px" }}>
             Matchkalender
           </h3>

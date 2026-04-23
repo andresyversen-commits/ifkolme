@@ -29,6 +29,169 @@ const SEED_PATH = path.join(__dirname, "data.seed.json");
 const MATCH_COUNT = 13;
 const MAX_2015 = 3;
 const COACH_NAMES = ["Jonas", "Per", "Anders", "Kim"];
+const DEFAULT_MINFOTBOLL_ICS_URL =
+  process.env.MINFOTBOLL_ICS_URL ||
+  "https://minfotboll-api.azurewebsites.net/api/ExternalCalendarAPI/GetMemberCalendar/dmJFMkpKuMBlDjjZjRJNMKsxWnquLwbT.ics";
+
+function normalizeIcsUrl(rawUrl) {
+  const u = String(rawUrl || "").trim();
+  if (!u) return DEFAULT_MINFOTBOLL_ICS_URL;
+  if (u.startsWith("webcal://")) return `https://${u.slice("webcal://".length)}`;
+  return u;
+}
+
+function unfoldIcsLines(text) {
+  const lines = String(text || "").replace(/\r\n/g, "\n").split("\n");
+  const out = [];
+  for (const line of lines) {
+    if ((line.startsWith(" ") || line.startsWith("\t")) && out.length) {
+      out[out.length - 1] += line.slice(1);
+    } else {
+      out.push(line);
+    }
+  }
+  return out;
+}
+
+function decodeIcsText(value) {
+  return String(value || "")
+    .replace(/\\n/gi, "\n")
+    .replace(/\\,/g, ",")
+    .replace(/\\;/g, ";")
+    .replace(/\\\\/g, "\\")
+    .trim();
+}
+
+function parseIcsDateTime(rawValue) {
+  const value = String(rawValue || "").trim();
+  if (!value) return null;
+  if (/^\d{8}$/.test(value)) {
+    const y = value.slice(0, 4);
+    const m = value.slice(4, 6);
+    const d = value.slice(6, 8);
+    return { date: `${y}-${m}-${d}`, time: "00:00", sortTs: Number(`${y}${m}${d}0000`) };
+  }
+  const compact = value.endsWith("Z") ? value.slice(0, -1) : value;
+  if (!/^\d{8}T\d{6}$/.test(compact)) return null;
+  const y = compact.slice(0, 4);
+  const m = compact.slice(4, 6);
+  const d = compact.slice(6, 8);
+  const hh = compact.slice(9, 11);
+  const mm = compact.slice(11, 13);
+  return {
+    date: `${y}-${m}-${d}`,
+    time: `${hh}:${mm}`,
+    sortTs: Number(`${y}${m}${d}${hh}${mm}`),
+  };
+}
+
+function inferBranchFromText(text) {
+  const t = String(text || "").toLowerCase();
+  if (/\bp[\s-]?11\b/.test(t)) return "p11";
+  if (/\bp[\s-]?10\b/.test(t)) return "p10";
+  return null;
+}
+
+function parseTeamsFromSummary(summary) {
+  const cleaned = decodeIcsText(summary)
+    .replace(/\b(p[\s-]?10|p[\s-]?11)\b/gi, "")
+    .replace(/\s+/g, " ")
+    .trim();
+  const separators = [" - ", " – ", " — ", " vs ", " VS ", " v ", " : "];
+  for (const sep of separators) {
+    if (!cleaned.includes(sep)) continue;
+    const [a, b] = cleaned.split(sep).map((s) => s.trim()).filter(Boolean);
+    if (a && b) return { home: a, away: b };
+  }
+  return { home: "", away: "" };
+}
+
+function parseIcsFixtures(icsText) {
+  const lines = unfoldIcsLines(icsText);
+  const events = [];
+  let current = null;
+  for (const line of lines) {
+    if (line === "BEGIN:VEVENT") {
+      current = {};
+      continue;
+    }
+    if (line === "END:VEVENT") {
+      if (current?.dtstart) events.push(current);
+      current = null;
+      continue;
+    }
+    if (!current) continue;
+    const idx = line.indexOf(":");
+    if (idx <= 0) continue;
+    const keyPart = line.slice(0, idx);
+    const valuePart = line.slice(idx + 1);
+    const key = keyPart.split(";")[0].toUpperCase();
+    if (key === "DTSTART") current.dtstart = valuePart;
+    else if (key === "SUMMARY") current.summary = decodeIcsText(valuePart);
+    else if (key === "LOCATION") current.location = decodeIcsText(valuePart);
+    else if (key === "DESCRIPTION") current.description = decodeIcsText(valuePart);
+    else if (key === "CATEGORIES") current.categories = decodeIcsText(valuePart);
+  }
+
+  const parsed = [];
+  for (const ev of events) {
+    const dt = parseIcsDateTime(ev.dtstart);
+    if (!dt) continue;
+    const hintText = [ev.summary, ev.description, ev.categories].filter(Boolean).join(" ");
+    const branch = inferBranchFromText(hintText);
+    if (!branch) continue;
+    const teams = parseTeamsFromSummary(ev.summary || "");
+    parsed.push({
+      branch,
+      date: dt.date,
+      time: dt.time,
+      venue: ev.location || "",
+      home: teams.home,
+      away: teams.away,
+      summary: ev.summary || "",
+      sortTs: dt.sortTs,
+    });
+  }
+  return parsed.sort((a, b) => a.sortTs - b.sortTs);
+}
+
+function syncFixturesFromIcs(state, fixtures) {
+  const byBranch = {
+    p10: fixtures.filter((f) => f.branch === "p10"),
+    p11: fixtures.filter((f) => f.branch === "p11"),
+  };
+  const touched = [];
+  for (const branch of ["p10", "p11"]) {
+    const targetMatches = (state.matches || [])
+      .filter((m) => (m.branch || "p10") === branch)
+      .sort(compareMatchesChronologically);
+    const src = byBranch[branch];
+    const n = Math.min(targetMatches.length, src.length);
+    for (let i = 0; i < n; i++) {
+      const m = targetMatches[i];
+      const f = src[i];
+      if (!m.fixture || typeof m.fixture !== "object") m.fixture = {};
+      const prevAssist = m.fixture.p11Assist2016;
+      m.fixture = {
+        ...m.fixture,
+        date: f.date,
+        time: f.time || "00:00",
+        venue: f.venue || m.fixture.venue || "",
+        home: f.home || m.fixture.home || "",
+        away: f.away || m.fixture.away || "",
+      };
+      if (branch === "p11" && prevAssist !== undefined) {
+        m.fixture.p11Assist2016 = prevAssist;
+      }
+      touched.push(m.id);
+    }
+  }
+  state.matches.sort(compareMatchesChronologically);
+  return {
+    updatedMatches: touched.length,
+    sourceCounts: { p10: byBranch.p10.length, p11: byBranch.p11.length },
+  };
+}
 
 function expectedAvailableIdsByYear(state, year) {
   return state.players
@@ -387,6 +550,35 @@ if (isProd) {
 
 app.get("/api/state", (_req, res) => {
   res.json(jsonState(readState()));
+});
+
+app.post("/api/fixtures/sync-ics", async (req, res) => {
+  try {
+    const state = readState();
+    const url = normalizeIcsUrl(req.body?.url);
+    const response = await fetch(url);
+    if (!response.ok) {
+      return res.status(400).json({ error: `Kunde inte hämta ICS (${response.status}).` });
+    }
+    const icsText = await response.text();
+    const fixtures = parseIcsFixtures(icsText);
+    if (!fixtures.length) {
+      return res.status(400).json({ error: "Inga matcher hittades i ICS-flödet." });
+    }
+    const result = syncFixturesFromIcs(state, fixtures);
+    writeState(state);
+    return res.json({
+      ...jsonState(state),
+      sync: {
+        url,
+        parsedEvents: fixtures.length,
+        updatedMatches: result.updatedMatches,
+        sourceCounts: result.sourceCounts,
+      },
+    });
+  } catch (e) {
+    return res.status(500).json({ error: `ICS-synk misslyckades: ${e.message}` });
+  }
 });
 
 app.get("/api/simulate-season", (_req, res) => {
