@@ -778,6 +778,11 @@ async function readState() {
     bootstrappedFromFallback = Boolean(settingsPool);
   }
 
+  if (!data) {
+    data = defaultState();
+    bootstrappedFromFallback = bootstrappedFromFallback || Boolean(settingsPool);
+  }
+
   if (shouldRestoreFromRemoteState(data)) {
     data = JSON.parse(JSON.stringify(remoteStateCache));
   }
