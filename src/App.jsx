@@ -1414,6 +1414,7 @@ export default function App() {
   const [playerSubTab, setPlayerSubTab] = useState("players");
   /** Underflikar inom Matcher: P10 / P11 */
   const [activeMatchId, setActiveMatchId] = useState(null);
+  const [matchDetailOpenMobile, setMatchDetailOpenMobile] = useState(false);
   const [importing, setImporting] = useState(false);
   const [deferredInstallPrompt, setDeferredInstallPrompt] = useState(null);
   const [installHint, setInstallHint] = useState("");
@@ -1722,6 +1723,16 @@ export default function App() {
     });
     setActiveMatchId((firstInVisibleMonth || matchesCalendar[0]).id);
   }, [matchesCalendar, activeMatchId, visibleCalendarMonth.year, visibleCalendarMonth.month]);
+  const activeMatch = useMemo(
+    () => matchesCalendar.find((m) => m.id === activeMatchId) || null,
+    [matchesCalendar, activeMatchId],
+  );
+  const openMatchDetail = useCallback((matchId) => {
+    setActiveMatchId(matchId);
+    if (typeof window !== "undefined" && window.matchMedia("(max-width: 980px)").matches) {
+      setMatchDetailOpenMobile(true);
+    }
+  }, []);
 
   function playerName(id) {
     return state?.players.find((p) => p.id === id)?.name ?? id;
@@ -2489,11 +2500,13 @@ export default function App() {
           <p className="panel__lead" style={{ marginTop: 0 }}>
             Nästa grupp i tur: <strong>{rotationView?.nextGroupLabel ?? "Grupp A"}</strong>
           </p>
-          <h3 className="panel__title" style={{ fontSize: 17, margin: "0 0 8px" }}>
-            Matchkalender
-          </h3>
-          <div className="calendar-month-stack" aria-label="Matchkalender">
-            <div className="calendar-nav">
+          <div className={`matches-layout ${matchDetailOpenMobile ? "matches-layout--detail-open" : ""}`}>
+            <div className="matches-layout__calendar">
+              <h3 className="panel__title" style={{ fontSize: 17, margin: "0 0 8px" }}>
+                Matchkalender
+              </h3>
+              <div className="calendar-month-stack" aria-label="Matchkalender">
+                <div className="calendar-nav">
               <button
                 type="button"
                 className="btn btn--secondary btn--sm"
@@ -2516,78 +2529,93 @@ export default function App() {
               >
                 Nästa →
               </button>
+                </div>
+                <section className="calendar-month">
+                  <div className="calendar-month__weekdays" aria-hidden>
+                    {["Mån", "Tis", "Ons", "Tor", "Fre", "Lör", "Sön"].map((w) => (
+                      <span key={w}>{w}</span>
+                    ))}
+                  </div>
+                  <div className="calendar-month__grid">
+                    {calendarMonthView.cells.map((day, i) => {
+                      if (!day) return <div key={`empty-${calendarMonthView.key}-${i}`} className="calendar-day calendar-day--empty" />;
+                      const dayMatches = calendarMonthView.matchesByDay.get(day) || [];
+                      return (
+                        <div key={`${calendarMonthView.key}-${day}`} className="calendar-day">
+                          <span className="calendar-day__date">{day}</span>
+                          <div className="calendar-day__matches">
+                            {dayMatches.map((m) => {
+                              const st = calendarStatus(m);
+                              const branchLabel = (m.branch || "p10") === "p11" ? "P11" : "P10";
+                              const opponent = calendarOpponentName(m);
+                              const oppLogo = calendarOpponentLogo(m);
+                              const hasUpdate = Boolean((m.note || "").trim()) || (m.comments || []).length > 0;
+                              return (
+                                <button
+                                  key={m.id}
+                                  type="button"
+                                  className={`calendar-event calendar-event--${branchLabel.toLowerCase()}${activeMatchId === m.id ? " calendar-event--active" : ""}`}
+                                  onClick={() => openMatchDetail(m.id)}
+                                  title={`Match ${m.number} · ${branchLabel} · ${opponent} · ${calendarTimeLabel(m)} · ${st.label}`}
+                                >
+                                  <div className="calendar-event__top">
+                                    <span className={`calendar-match__dot ${st.cls}`} aria-hidden />
+                                    <strong>{branchLabel}</strong>
+                                    {hasUpdate ? <span className="calendar-event__update">Notis</span> : null}
+                                  </div>
+                                  <div className="calendar-event__opponent">
+                                    <CalendarEventCrest name={oppLogo.name} logoUrl={oppLogo.logoUrl} />
+                                    <span>{opponent}</span>
+                                  </div>
+                                  <div className="calendar-event__time">
+                                    {calendarTimeLabel(m)}
+                                    <span className="calendar-event__hint">Öppna</span>
+                                  </div>
+                                </button>
+                              );
+                            })}
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
+                </section>
+              </div>
             </div>
-            <section className="calendar-month">
-              <div className="calendar-month__weekdays" aria-hidden>
-                {["Mån", "Tis", "Ons", "Tor", "Fre", "Lör", "Sön"].map((w) => (
-                  <span key={w}>{w}</span>
-                ))}
-              </div>
-              <div className="calendar-month__grid">
-                {calendarMonthView.cells.map((day, i) => {
-                  if (!day) return <div key={`empty-${calendarMonthView.key}-${i}`} className="calendar-day calendar-day--empty" />;
-                  const dayMatches = calendarMonthView.matchesByDay.get(day) || [];
-                  return (
-                    <div key={`${calendarMonthView.key}-${day}`} className="calendar-day">
-                      <span className="calendar-day__date">{day}</span>
-                      <div className="calendar-day__matches">
-                        {dayMatches.map((m) => {
-                          const st = calendarStatus(m);
-                          const branchLabel = (m.branch || "p10") === "p11" ? "P11" : "P10";
-                          const opponent = calendarOpponentName(m);
-                          const oppLogo = calendarOpponentLogo(m);
-                          const hasUpdate = Boolean((m.note || "").trim()) || (m.comments || []).length > 0;
-                          return (
-                            <button
-                              key={m.id}
-                              type="button"
-                              className={`calendar-event calendar-event--${branchLabel.toLowerCase()}${activeMatchId === m.id ? " calendar-event--active" : ""}`}
-                              onClick={() => setActiveMatchId(m.id)}
-                              title={`Match ${m.number} · ${branchLabel} · ${opponent} · ${calendarTimeLabel(m)} · ${st.label}`}
-                            >
-                              <div className="calendar-event__top">
-                                <span className={`calendar-match__dot ${st.cls}`} aria-hidden />
-                                <strong>{branchLabel}</strong>
-                                {hasUpdate ? <span className="calendar-event__update">Notis</span> : null}
-                              </div>
-                              <div className="calendar-event__opponent">
-                                <CalendarEventCrest name={oppLogo.name} logoUrl={oppLogo.logoUrl} />
-                                <span>{opponent}</span>
-                              </div>
-                              <div className="calendar-event__time">
-                                {calendarTimeLabel(m)}
-                                <span className="calendar-event__hint">Öppna</span>
-                              </div>
-                            </button>
-                          );
-                        })}
-                      </div>
-                    </div>
-                  );
-                })}
-              </div>
-            </section>
-          </div>
 
-          {matchesCalendar.find((m) => m.id === activeMatchId) ? (
-            <div className="section-spacer" style={{ marginTop: 14 }}>
-              <MatchCard
-                m={matchesCalendar.find((m) => m.id === activeMatchId)}
-                rotationView={rotationView}
-                players2015={players2015}
-                players2016={players2016}
-                state={state}
-                playerName={playerName}
-                load={load}
-                setErr={setErr}
-                groupsValid={matchGroupsValid}
-                coachNames={coachNames}
-                onCopied={setOkMsg}
-                cardTitle="Match"
-                displayNumber={matchesCalendar.find((m) => m.id === activeMatchId)?.number}
-              />
+            <div className="matches-layout__detail">
+              <div className="matches-layout__detail-head">
+                <button
+                  type="button"
+                  className="btn btn--secondary btn--sm matches-layout__back"
+                  onClick={() => setMatchDetailOpenMobile(false)}
+                >
+                  ← Till kalender
+                </button>
+              </div>
+              {activeMatch ? (
+                <div className="section-spacer">
+                  <MatchCard
+                    m={activeMatch}
+                    rotationView={rotationView}
+                    players2015={players2015}
+                    players2016={players2016}
+                    state={state}
+                    playerName={playerName}
+                    load={load}
+                    setErr={setErr}
+                    groupsValid={matchGroupsValid}
+                    coachNames={coachNames}
+                    onCopied={setOkMsg}
+                    cardTitle="Match"
+                    displayNumber={activeMatch?.number}
+                  />
+                </div>
+              ) : (
+                <p className="text-muted">Välj en match i kalendern.</p>
+              )}
             </div>
-          ) : null}
+          </div>
         </section>
       )}
 
