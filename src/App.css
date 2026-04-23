@@ -192,7 +192,7 @@ body {
 
 .segmented--match-tabs {
   display: grid;
-  grid-template-columns: 1fr;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
   gap: 6px;
   width: 100%;
 }
@@ -1058,12 +1058,22 @@ body {
   max-width: 100%;
   min-width: 0;
   overflow-x: hidden;
+  padding: 12px 14px;
 }
 
-.lineup-panel * {
-  box-sizing: border-box;
+.lineup-layout {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+  gap: 14px;
+  width: 100%;
   max-width: 100%;
   min-width: 0;
+}
+
+.lineup-layout__controls,
+.lineup-layout__pitch {
+  min-width: 0;
+  max-width: 100%;
 }
 
 .lineup-formation-wrap {
@@ -1081,24 +1091,22 @@ body {
 }
 
 .lineup-formation-grid {
-  display: block;
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 8px;
   width: 100%;
 }
 
 .lineup-formation-grid > * {
-  display: block;
   width: 100%;
   min-width: 0;
   max-width: 100%;
-  margin-bottom: 8px;
-}
-
-.lineup-formation-grid > *:last-child {
-  margin-bottom: 0;
 }
 
 .lineup-player-grid {
-  display: block;
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: 10px;
   width: 100%;
   max-width: 100%;
   min-width: 0;
@@ -1108,52 +1116,16 @@ body {
   width: 100%;
   max-width: 100%;
   min-width: 0;
-  margin-bottom: 10px;
-}
-
-.lineup-player-grid .field:last-child {
-  margin-bottom: 0;
-}
-
-/* Hard fallback: never allow lineup controls to create horizontal pressure. */
-.lineup-panel .lineup-formation-grid,
-.lineup-panel .lineup-player-grid,
-.lineup-panel .lineup-formation-wrap {
-  display: block !important;
-  width: 100% !important;
-  max-width: 100% !important;
-  min-width: 0 !important;
-}
-
-.lineup-panel .lineup-formation-grid > *,
-.lineup-panel .lineup-player-grid > * {
-  display: block !important;
-  width: 100% !important;
-  max-width: 100% !important;
-  min-width: 0 !important;
-}
-
-.lineup-panel .field__input,
-.lineup-panel .field__select,
-.lineup-panel input[type="number"],
-.lineup-panel select,
-.lineup-panel button {
-  width: 100%;
-  max-width: 100%;
-}
-
-.lineup-panel .btn-row {
-  width: 100%;
-}
-
-.lineup-panel .btn-row .btn {
-  width: 100%;
 }
 
 .lineup-panel .lineup-dnd-help,
 .lineup-panel .text-muted {
   overflow-wrap: anywhere;
   word-break: break-word;
+}
+
+.lineup-panel .btn-row {
+  justify-content: flex-start;
 }
 
 /* Laddning / tomt */
@@ -1371,7 +1343,7 @@ body {
 
 .lineup-pitch__surface {
   position: relative;
-  height: 330px;
+  height: 440px;
   border-radius: 16px;
   border: 1px solid color-mix(in oklab, #14532d 45%, white);
   background:
@@ -2088,7 +2060,7 @@ body {
   }
 
   .lineup-pitch__surface {
-    height: 300px;
+    height: 380px;
   }
 
   .lineup-pitch__player {
@@ -2102,10 +2074,20 @@ body {
   }
 
   .lineup-player-grid {
-    gap: 10px;
+    gap: 8px;
+  }
+
+  .lineup-panel {
+    padding: 10px 10px;
   }
 
   .logo-manager__row {
+    grid-template-columns: 1fr;
+  }
+}
+
+@media (max-width: 980px) {
+  .lineup-layout {
     grid-template-columns: 1fr;
   }
 }
@@ -2138,6 +2120,14 @@ body {
 
   .fixture-block__time {
     font-size: 20px;
+  }
+
+  .lineup-pitch__surface {
+    height: 350px;
+  }
+
+  .segmented--match-tabs {
+    grid-template-columns: 1fr;
   }
 
   .segmented--match-tabs .segmented__btn {

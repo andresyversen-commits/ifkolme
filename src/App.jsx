@@ -3,7 +3,7 @@ import * as XLSX from "xlsx";
 import { useRegisterSW } from "virtual:pwa-register/react";
 import { Button } from "@/components/ui/button";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
-import { resolveTeamLogoUrl, teamInitials } from "@/lib/teamLogos";
+import { normalizeClubName, resolveTeamLogoUrl, teamInitials } from "@/lib/teamLogos";
 import { matchSquadMode, p11Assist2016Count, compareMatchesChronologically } from "../selection.mjs";
 
 const PROD_API_FALLBACK = "https://ifkolme-production.up.railway.app";
@@ -263,8 +263,8 @@ function MinFotbollFixture({ fixture, getStoredTeamLogo }) {
   const awayTeam = String(fixture.away || fixture.awayTeam || "").trim();
   const dateLabel = formatFixtureDateSv(fixture.date);
   const timeIsPlaceholder = fixture.time === "00:00";
-  const homeLogo = fixture.homeLogo || getStoredTeamLogo?.(homeTeam);
-  const awayLogo = fixture.awayLogo || getStoredTeamLogo?.(awayTeam);
+  const homeLogo = fixture.homeLogo || fixture.home_logo || getStoredTeamLogo?.(homeTeam);
+  const awayLogo = fixture.awayLogo || fixture.away_logo || getStoredTeamLogo?.(awayTeam);
   return (
     <div className="fixture-block">
       <header className="fixture-block__head">
@@ -710,10 +710,27 @@ function MatchCard({
   const togglePlayerAvailability = async (player) => {
     setErr("");
     try {
+      const willBecomeUnavailable = player.available !== false;
       await api(`/api/players/${player.id}`, {
         method: "PUT",
-        body: { available: player.available === false },
+        body: { available: !willBecomeUnavailable },
       });
+      if (
+        willBecomeUnavailable &&
+        m.status !== "played" &&
+        Array.isArray(m.selectedPlayerIds) &&
+        m.selectedPlayerIds.includes(player.id)
+      ) {
+        const wantsReplacement = confirm(
+          `${player.name} markerades som otillgänglig. Vill du ersätta med nästa spelare i kön nu?`,
+        );
+        if (wantsReplacement) {
+          await api(`/api/matches/${m.id}/select`, {
+            method: "POST",
+          });
+          if (typeof onCopied === "function") onCopied("Laget uppdaterat med nästa i kön.");
+        }
+      }
       await load({ silent: true });
     } catch (x) {
       setErr(x.message);
@@ -870,147 +887,151 @@ function MatchCard({
           {formationTotal !== 6 ? (
             <p className="text-muted">Summan av försvar + mittfält + anfall måste vara 6.</p>
           ) : (
-            <>
-              <div className="lineup-dnd-help">Velg posisjon for hver spiller. Smart-fyll bruker spillerens foretrukne posisjon.</div>
-              <div className="btn-row" style={{ marginBottom: 8 }}>
-                <button
-                  type="button"
-                  className="btn btn--secondary"
-                  onClick={() => {
-                    const remaining = [...selectedRows];
-                    const slotOrder = ["gk", ...outfieldSlots.map((s) => s.key)];
-                    const next = {};
-                    const pickOne = (predicate) => {
-                      const idx = remaining.findIndex(predicate);
-                      if (idx < 0) return null;
-                      const [p] = remaining.splice(idx, 1);
-                      return p;
-                    };
-                    const gk = pickOne((p) => /målvakt/i.test(p.preferredPosition || "")) || remaining.shift() || null;
-                    if (gk) next[gk.id] = "gk";
-                    for (const slotKey of slotOrder.slice(1)) {
-                      const slot = outfieldSlots.find((s) => s.key === slotKey);
-                      if (!slot) continue;
-                      const pref =
-                        slot.role === "defender"
-                          ? /försvar/i
-                          : slot.role === "midfielder"
-                            ? /mittfält/i
-                            : /anfall/i;
-                      const player = pickOne((p) => pref.test(p.preferredPosition || "")) || pickOne((p) => /allround/i.test(p.preferredPosition || "")) || remaining.shift() || null;
-                      if (player) next[player.id] = slotKey;
-                    }
-                    for (const p of remaining) next[p.id] = "bench";
-                    setPositionDraftByPlayer((prev) => ({ ...prev, ...next }));
-                  }}
-                >
-                  Smart fyll
-                </button>
-              </div>
-              <div className="lineup-player-grid">
-                {selectedRows.map((p) => (
-                  <div key={`pos-${p.id}`} className="field">
-                    <span className="field__label">
-                      {p.name} {p.jerseyNumber ? `#${p.jerseyNumber}` : ""}
-                    </span>
-                    <select
-                      className="field__select"
-                      value={positionDraftByPlayer[p.id] || "bench"}
-                      onChange={(e) =>
-                        setPositionDraftByPlayer((prev) => ({
-                          ...prev,
-                          [p.id]: e.target.value,
-                        }))
+            <div className="lineup-layout">
+              <div className="lineup-layout__controls">
+                <div className="lineup-dnd-help">Velg posisjon for hver spiller. Smart-fyll bruker spillerens foretrukne posisjon.</div>
+                <div className="btn-row" style={{ marginBottom: 8 }}>
+                  <button
+                    type="button"
+                    className="btn btn--secondary"
+                    onClick={() => {
+                      const remaining = [...selectedRows];
+                      const slotOrder = ["gk", ...outfieldSlots.map((s) => s.key)];
+                      const next = {};
+                      const pickOne = (predicate) => {
+                        const idx = remaining.findIndex(predicate);
+                        if (idx < 0) return null;
+                        const [p] = remaining.splice(idx, 1);
+                        return p;
+                      };
+                      const gk = pickOne((p) => /målvakt/i.test(p.preferredPosition || "")) || remaining.shift() || null;
+                      if (gk) next[gk.id] = "gk";
+                      for (const slotKey of slotOrder.slice(1)) {
+                        const slot = outfieldSlots.find((s) => s.key === slotKey);
+                        if (!slot) continue;
+                        const pref =
+                          slot.role === "defender"
+                            ? /försvar/i
+                            : slot.role === "midfielder"
+                              ? /mittfält/i
+                              : /anfall/i;
+                        const player = pickOne((p) => pref.test(p.preferredPosition || "")) || pickOne((p) => /allround/i.test(p.preferredPosition || "")) || remaining.shift() || null;
+                        if (player) next[player.id] = slotKey;
                       }
-                    >
-                      <option value="bench">Bänk</option>
-                      <option value="gk">Målvakt</option>
-                      {outfieldSlots.map((slot) => (
-                        <option key={`opt-${slot.key}`} value={slot.key}>
-                          {slotLabelFromKey(slot.key, outfieldSlots)}
-                        </option>
-                      ))}
-                    </select>
-                  </div>
-                ))}
-              </div>
-              {!startersUnique ? <p className="text-muted">En position kan bara ha en spelare. Välj unika positioner.</p> : null}
-              {benchPlayers.length > 0 ? (
-                <p className="text-muted">Bänk: {benchPlayers.map((p) => p.name).join(", ")}</p>
-              ) : null}
-              <div className="btn-row" style={{ marginTop: 6 }}>
-                <button
-                  type="button"
-                  className="btn btn--primary"
-                  disabled={formationTotal !== 6 || !startersReady}
-                  onClick={async () => {
-                    setErr("");
-                    try {
-                      const starters = [
-                        { playerId: slotToPlayer.gk, role: "goalkeeper", lane: "central", order: 0 },
-                        ...outfieldSlots.map((slot) => ({
-                          playerId: slotToPlayer[slot.key],
-                          role: slot.role,
-                          lane: slot.lane,
-                          order: slot.order,
-                        })),
-                      ];
-                      await api(`/api/matches/${m.id}/lineup`, {
-                        method: "PUT",
-                        body: {
-                          formation: formationDraft,
-                          side: sideDraft,
-                          starters,
-                          substitutions: [],
-                        },
-                      });
-                      await load();
-                    } catch (x) {
-                      setErr(x.message);
-                    }
-                  }}
-                >
-                  Spara startuppställning
-                </button>
-              </div>
-              <div className="lineup-pitch" aria-label="Startelva på fotbollsplan">
-                <div className="lineup-pitch__surface">
-                  <div className="lineup-pitch__half" />
-                  <div className="lineup-pitch__circle" />
-                  <div className="lineup-pitch__box lineup-pitch__box--top" />
-                  <div className="lineup-pitch__box lineup-pitch__box--bottom" />
-                  {[{ key: "gk", role: "goalkeeper", x: 50, y: 86 }, ...outfieldSlots.map((slot) => ({
-                    key: slot.key,
-                    role: slot.role,
-                    x: slot.lane === "vänster" ? 24 : slot.lane === "höger" ? 76 : 50,
-                    y: slot.role === "defender" ? 66 : slot.role === "midfielder" ? 48 : 30,
-                  }))].map((slotNode) => {
-                    const playerId = slotToPlayer[slotNode.key];
-                    const player = playerId ? selectedById.get(playerId) : null;
-                    return (
-                      <div
-                        key={slotNode.key}
-                        className={`lineup-pitch__slot lineup-pitch__slot--${slotNode.role} ${player ? "is-filled" : ""}`}
-                        style={{ left: `${slotNode.x}%`, top: `${slotNode.y}%` }}
-                        title={player ? `${player.name}${player.jerseyNumber ? ` (#${player.jerseyNumber})` : ""}` : roleLabelSv(slotNode.role)}
-                      >
-                        {player ? (
-                          <div className={`lineup-pitch__player lineup-pitch__player--${slotNode.role}`}>
-                            <span className="lineup-pitch__number">{player.jerseyNumber || "?"}</span>
-                            <span className="lineup-pitch__name">{player.name}</span>
-                          </div>
-                        ) : (
-                          <span className="lineup-pitch__empty">{roleLabelSv(slotNode.role)}</span>
-                        )}
-                      </div>
-                    );
-                  })}
+                      for (const p of remaining) next[p.id] = "bench";
+                      setPositionDraftByPlayer((prev) => ({ ...prev, ...next }));
+                    }}
+                  >
+                    Smart fyll
+                  </button>
                 </div>
-                <p className="lineup-pitch__meta">
-                  Formation {formationDraft.defenders}-{formationDraft.midfielders}-{formationDraft.attackers}
-                </p>
+                <div className="lineup-player-grid">
+                  {selectedRows.map((p) => (
+                    <div key={`pos-${p.id}`} className="field">
+                      <span className="field__label">
+                        {p.name} {p.jerseyNumber ? `#${p.jerseyNumber}` : ""}
+                      </span>
+                      <select
+                        className="field__select"
+                        value={positionDraftByPlayer[p.id] || "bench"}
+                        onChange={(e) =>
+                          setPositionDraftByPlayer((prev) => ({
+                            ...prev,
+                            [p.id]: e.target.value,
+                          }))
+                        }
+                      >
+                        <option value="bench">Bänk</option>
+                        <option value="gk">Målvakt</option>
+                        {outfieldSlots.map((slot) => (
+                          <option key={`opt-${slot.key}`} value={slot.key}>
+                            {slotLabelFromKey(slot.key, outfieldSlots)}
+                          </option>
+                        ))}
+                      </select>
+                    </div>
+                  ))}
+                </div>
+                {!startersUnique ? <p className="text-muted">En position kan bara ha en spelare. Välj unika positioner.</p> : null}
+                {benchPlayers.length > 0 ? (
+                  <p className="text-muted">Bänk: {benchPlayers.map((p) => p.name).join(", ")}</p>
+                ) : null}
+                <div className="btn-row" style={{ marginTop: 6 }}>
+                  <button
+                    type="button"
+                    className="btn btn--primary"
+                    disabled={formationTotal !== 6 || !startersReady}
+                    onClick={async () => {
+                      setErr("");
+                      try {
+                        const starters = [
+                          { playerId: slotToPlayer.gk, role: "goalkeeper", lane: "central", order: 0 },
+                          ...outfieldSlots.map((slot) => ({
+                            playerId: slotToPlayer[slot.key],
+                            role: slot.role,
+                            lane: slot.lane,
+                            order: slot.order,
+                          })),
+                        ];
+                        await api(`/api/matches/${m.id}/lineup`, {
+                          method: "PUT",
+                          body: {
+                            formation: formationDraft,
+                            side: sideDraft,
+                            starters,
+                            substitutions: [],
+                          },
+                        });
+                        await load();
+                      } catch (x) {
+                        setErr(x.message);
+                      }
+                    }}
+                  >
+                    Spara startuppställning
+                  </button>
+                </div>
               </div>
-            </>
+              <div className="lineup-layout__pitch">
+                <div className="lineup-pitch" aria-label="Startelva på fotbollsplan">
+                  <div className="lineup-pitch__surface">
+                    <div className="lineup-pitch__half" />
+                    <div className="lineup-pitch__circle" />
+                    <div className="lineup-pitch__box lineup-pitch__box--top" />
+                    <div className="lineup-pitch__box lineup-pitch__box--bottom" />
+                    {[{ key: "gk", role: "goalkeeper", x: 50, y: 86 }, ...outfieldSlots.map((slot) => ({
+                      key: slot.key,
+                      role: slot.role,
+                      x: slot.lane === "vänster" ? 24 : slot.lane === "höger" ? 76 : 50,
+                      y: slot.role === "defender" ? 66 : slot.role === "midfielder" ? 48 : 30,
+                    }))].map((slotNode) => {
+                      const playerId = slotToPlayer[slotNode.key];
+                      const player = playerId ? selectedById.get(playerId) : null;
+                      return (
+                        <div
+                          key={slotNode.key}
+                          className={`lineup-pitch__slot lineup-pitch__slot--${slotNode.role} ${player ? "is-filled" : ""}`}
+                          style={{ left: `${slotNode.x}%`, top: `${slotNode.y}%` }}
+                          title={player ? `${player.name}${player.jerseyNumber ? ` (#${player.jerseyNumber})` : ""}` : roleLabelSv(slotNode.role)}
+                        >
+                          {player ? (
+                            <div className={`lineup-pitch__player lineup-pitch__player--${slotNode.role}`}>
+                              <span className="lineup-pitch__number">{player.jerseyNumber || "?"}</span>
+                              <span className="lineup-pitch__name">{player.name}</span>
+                            </div>
+                          ) : (
+                            <span className="lineup-pitch__empty">{roleLabelSv(slotNode.role)}</span>
+                          )}
+                        </div>
+                      );
+                    })}
+                  </div>
+                  <p className="lineup-pitch__meta">
+                    Formation {formationDraft.defenders}-{formationDraft.midfielders}-{formationDraft.attackers}
+                  </p>
+                </div>
+              </div>
+            </div>
           )}
         </div>
       )}
@@ -1368,16 +1389,14 @@ export default function App() {
   }, []);
 
   useEffect(() => {
-    let hasCachedState = false;
+    let cachedSnapshot = null;
     try {
       const cached = localStorage.getItem(LS_STATE_KEY);
       if (cached) {
         const parsed = JSON.parse(cached);
         if (parsed && parsed.matches && parsed.players) {
-          setState(parsed);
           cachedSnapshotRef.current = parsed;
-          hasCachedState = true;
-          setLoading(false);
+          cachedSnapshot = parsed;
         }
       }
       const ui = localStorage.getItem(LS_UI_KEY);
@@ -1394,7 +1413,12 @@ export default function App() {
     }
     load()
       .catch((e) => {
-        if (!hasCachedState) setErr(e.message);
+        if (cachedSnapshot) {
+          setState(cachedSnapshot);
+          setErr("");
+        } else {
+          setErr(e.message);
+        }
       })
       .finally(() => setLoading(false));
   }, [load]);
@@ -1675,20 +1699,39 @@ export default function App() {
     return state?.coachNames || ["Jonas", "Per", "Anders", "Kim"];
   }, [state?.coaches, state?.coachNames]);
   const teamNames = useMemo(() => {
-    const set = new Set();
+    const byNorm = new Map();
+    const addName = (raw) => {
+      const value = String(raw || "").trim();
+      if (!value) return;
+      const normalized = normalizeTeamKey(value);
+      if (!normalized) return;
+      if (!byNorm.has(normalized)) byNorm.set(normalized, value);
+    };
     for (const m of state?.matches || []) {
-      if (m.fixture?.home) set.add(m.fixture.home);
-      if (m.fixture?.away) set.add(m.fixture.away);
+      addName(m.fixture?.home);
+      addName(m.fixture?.away);
+      addName(m.fixture?.homeTeam);
+      addName(m.fixture?.awayTeam);
     }
-    return [...set].sort((a, b) => a.localeCompare(b, "sv"));
-  }, [state?.matches]);
+    for (const key of Object.keys(state?.teamLogos || {})) {
+      addName(key);
+    }
+    return [...byNorm.values()].sort((a, b) => a.localeCompare(b, "sv"));
+  }, [state?.matches, state?.teamLogos]);
   const getStoredTeamLogo = useCallback(
     (teamName) => {
       if (!teamName) return "";
       const direct = state?.teamLogos?.[teamName];
       if (direct) return direct;
       const norm = normalizeTeamKey(teamName);
-      return state?.teamLogos?.[norm] || "";
+      const normalizedClub = normalizeClubName(teamName);
+      const normalizedClubKey = normalizeTeamKey(normalizedClub);
+      return (
+        state?.teamLogos?.[norm] ||
+        state?.teamLogos?.[normalizedClub] ||
+        state?.teamLogos?.[normalizedClubKey] ||
+        ""
+      );
     },
     [state?.teamLogos],
   );
