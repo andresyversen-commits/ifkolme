@@ -98,6 +98,17 @@ function formatTimestampSv(iso) {
   });
 }
 
+function parseIsoDateLocal(isoDate) {
+  if (!isoDate || typeof isoDate !== "string") return null;
+  const [y, m, d] = isoDate.split("-").map(Number);
+  if (!y || !m || !d) return null;
+  return new Date(y, m - 1, d);
+}
+
+function daysInMonth(year, monthIndex) {
+  return new Date(year, monthIndex + 1, 0).getDate();
+}
+
 /** Truppvisning: samma namn-/år-typografi som översikten, sorterat 2015 först. */
 function MatchLineupNames({ playerIds, players }) {
   const rows = useMemo(() => {
@@ -1073,6 +1084,40 @@ export default function App() {
     return [...arr].sort(compareMatchesChronologically);
   }, [state?.matches]);
   const matchesCalendar = useMemo(() => matchesP10.slice(0, 13), [matchesP10]);
+  const calendarMonths = useMemo(() => {
+    const monthMap = new Map();
+    for (const m of matchesCalendar) {
+      const dt = parseIsoDateLocal(m.fixture?.date);
+      if (!dt) continue;
+      const y = dt.getFullYear();
+      const mo = dt.getMonth();
+      const day = dt.getDate();
+      const key = `${y}-${String(mo + 1).padStart(2, "0")}`;
+      if (!monthMap.has(key)) {
+        monthMap.set(key, {
+          key,
+          year: y,
+          month: mo,
+          matchesByDay: new Map(),
+        });
+      }
+      const entry = monthMap.get(key);
+      if (!entry.matchesByDay.has(day)) entry.matchesByDay.set(day, []);
+      entry.matchesByDay.get(day).push(m);
+    }
+    return [...monthMap.values()]
+      .sort((a, b) => (a.year !== b.year ? a.year - b.year : a.month - b.month))
+      .map((entry) => {
+        const totalDays = daysInMonth(entry.year, entry.month);
+        const first = new Date(entry.year, entry.month, 1);
+        const lead = (first.getDay() + 6) % 7; // Måndag = 0
+        const cells = [];
+        for (let i = 0; i < lead; i++) cells.push(null);
+        for (let d = 1; d <= totalDays; d++) cells.push(d);
+        while (cells.length % 7 !== 0) cells.push(null);
+        return { ...entry, cells };
+      });
+  }, [matchesCalendar]);
   const players2015 = useMemo(
     () => (state?.players ? state.players.filter((p) => p.birthYear === 2015) : []),
     [state?.players]
@@ -1583,27 +1628,55 @@ export default function App() {
           <h3 className="panel__title" style={{ fontSize: 17, margin: "0 0 8px" }}>
             Matchkalender
           </h3>
-          <div className="calendar-grid" aria-label="Matchkalender">
-            {matchesCalendar.map((m) => {
-              const st = calendarStatus(m);
-              return (
-                <button
-                  key={m.id}
-                  type="button"
-                  className={`calendar-match${activeMatchId === m.id ? " calendar-match--active" : ""}`}
-                  onClick={() => setActiveMatchId(m.id)}
-                >
-                  <div className="calendar-match__head">
-                    <strong>Match {m.number}</strong>
-                    <span className={`calendar-match__dot ${st.cls}`} aria-hidden />
+          {calendarMonths.length === 0 ? (
+            <p className="text-muted">Inga matchdatum att visa i kalendern.</p>
+          ) : (
+            <div className="calendar-month-stack" aria-label="Matchkalender">
+              {calendarMonths.map((month) => (
+                <section key={month.key} className="calendar-month">
+                  <h4 className="calendar-month__title">
+                    {new Date(month.year, month.month, 1).toLocaleDateString("sv-SE", {
+                      month: "long",
+                      year: "numeric",
+                    })}
+                  </h4>
+                  <div className="calendar-month__weekdays" aria-hidden>
+                    {["Mån", "Tis", "Ons", "Tor", "Fre", "Lör", "Sön"].map((w) => (
+                      <span key={w}>{w}</span>
+                    ))}
                   </div>
-                  <p className="calendar-match__status">{st.label}</p>
-                  <p className="calendar-match__meta">Grupp: {m.intendedGroup2015 || "—"}</p>
-                  <p className="calendar-match__meta">Spelare: {(m.selectedPlayerIds || []).length}</p>
-                </button>
-              );
-            })}
-          </div>
+                  <div className="calendar-month__grid">
+                    {month.cells.map((day, i) => {
+                      if (!day) return <div key={`empty-${month.key}-${i}`} className="calendar-day calendar-day--empty" />;
+                      const dayMatches = month.matchesByDay.get(day) || [];
+                      return (
+                        <div key={`${month.key}-${day}`} className="calendar-day">
+                          <span className="calendar-day__date">{day}</span>
+                          <div className="calendar-day__matches">
+                            {dayMatches.map((m) => {
+                              const st = calendarStatus(m);
+                              return (
+                                <button
+                                  key={m.id}
+                                  type="button"
+                                  className={`calendar-pill${activeMatchId === m.id ? " calendar-pill--active" : ""}`}
+                                  onClick={() => setActiveMatchId(m.id)}
+                                  title={`Match ${m.number} · ${st.label} · Grupp ${m.intendedGroup2015 || "—"} · ${(m.selectedPlayerIds || []).length} spelare`}
+                                >
+                                  <span className={`calendar-match__dot ${st.cls}`} aria-hidden />
+                                  M{m.number}
+                                </button>
+                              );
+                            })}
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
+                </section>
+              ))}
+            </div>
+          )}
 
           {matchesCalendar.find((m) => m.id === activeMatchId) ? (
             <div className="section-spacer" style={{ marginTop: 14 }}>

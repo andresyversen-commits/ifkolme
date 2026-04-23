@@ -72,7 +72,7 @@
     --chart-3: oklch(0.439 0 0);
     --chart-4: oklch(0.371 0 0);
     --chart-5: oklch(0.269 0 0);
-    --radius: 0.625rem;
+    --radius: 0.875rem;
     --sidebar: oklch(0.985 0 0);
     --sidebar-foreground: oklch(0.145 0 0);
     --sidebar-primary: oklch(0.205 0 0);
@@ -139,9 +139,9 @@
     --text-tertiary: oklch(0.62 0 0);
     --separator: var(--border);
     --separator-strong: var(--border);
-    --tint: var(--primary);
-    --tint-pressed: oklch(0.18 0 0);
-    --tint-soft: var(--accent);
+    --tint: #0a84ff;
+    --tint-pressed: #0067d9;
+    --tint-soft: color-mix(in oklab, #0a84ff 16%, white);
     --success: oklch(0.55 0.15 145);
     --danger: var(--destructive);
     --fill: var(--muted);
@@ -151,8 +151,8 @@
     --space-lg: 1.25rem;
     --touch: 44px;
     --font: "Geist Variable", ui-sans-serif, system-ui, sans-serif;
-    --shadow-sm: 0 1px 2px 0 rgb(0 0 0 / 0.05);
-    --shadow-card: 0 1px 3px 0 rgb(0 0 0 / 0.08), 0 1px 2px -1px rgb(0 0 0 / 0.08);
+    --shadow-sm: 0 1px 2px rgb(15 23 42 / 0.07);
+    --shadow-card: 0 8px 24px rgb(15 23 42 / 0.06), 0 1px 2px rgb(15 23 42 / 0.07);
     --radius-sm: calc(var(--radius) * 0.6);
   }
 }
