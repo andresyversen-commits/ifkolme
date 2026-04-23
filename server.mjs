@@ -25,6 +25,7 @@ import {
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const DATA_PATH = path.join(__dirname, "data.json");
+const SEED_PATH = path.join(__dirname, "data.seed.json");
 const MATCH_COUNT = 13;
 const MAX_2015 = 3;
 const COACH_NAMES = ["Jonas", "Per", "Anders", "Kim"];
@@ -81,6 +82,15 @@ function initialMatches() {
 }
 
 function defaultState() {
+  try {
+    const rawSeed = fs.readFileSync(SEED_PATH, "utf8");
+    const seed = JSON.parse(rawSeed);
+    if (Array.isArray(seed?.players) && Array.isArray(seed?.matches) && seed.players.length && seed.matches.length) {
+      return seed;
+    }
+  } catch {
+    // Fallback till inbyggd standard om seed saknas.
+  }
   const players = initialPlayers();
   const built6 = buildGroups2016FromPlayers(players);
   return {
@@ -95,6 +105,39 @@ function defaultState() {
     groups2016Extra: built6.groups2016Extra,
     fixturesP11: [],
   };
+}
+
+function loadSeedState() {
+  try {
+    const raw = fs.readFileSync(SEED_PATH, "utf8");
+    const seed = JSON.parse(raw);
+    if (!Array.isArray(seed?.players) || !Array.isArray(seed?.matches)) return null;
+    return seed;
+  } catch {
+    return null;
+  }
+}
+
+function ensureMinimumScheduleFromSeed(state) {
+  const seed = loadSeedState();
+  if (!seed) return false;
+  let dirty = false;
+  const has = new Set((state.matches || []).map((m) => m.id));
+  for (const sm of seed.matches || []) {
+    if (!has.has(sm.id)) {
+      state.matches.push(JSON.parse(JSON.stringify(sm)));
+      dirty = true;
+    }
+  }
+  const p11Count = (state.matches || []).filter((m) => m.branch === "p11").length;
+  if (p11Count === 0 && Array.isArray(seed.fixturesP11) && seed.fixturesP11.length > 0) {
+    state.fixturesP11 = JSON.parse(JSON.stringify(seed.fixturesP11));
+    dirty = true;
+  }
+  if (dirty) {
+    state.matches.sort(compareMatchesChronologically);
+  }
+  return dirty;
 }
 
 function ensureMeta(data) {
@@ -270,6 +313,7 @@ function readState() {
     if (repairGroups2015IfNeeded(data)) dirty = true;
     if (repairGroups2016IfNeeded(data)) dirty = true;
     if (stripLegacyP10SquadsIfNeeded(data)) dirty = true;
+    if (ensureMinimumScheduleFromSeed(data)) dirty = true;
     if (reconcilePlayerStats(data)) dirty = true;
     if (backfillIntendedGroups2015(data)) dirty = true;
     if (dirty) writeState(data);
@@ -290,6 +334,7 @@ function normalizeImportedState(raw) {
   repairGroups2015IfNeeded(data);
   repairGroups2016IfNeeded(data);
   stripLegacyP10SquadsIfNeeded(data);
+  ensureMinimumScheduleFromSeed(data);
   reconcilePlayerStats(data);
   backfillIntendedGroups2015(data);
   if (!validateGroups2015(data)) throw new Error("groups2015_invalid");
