@@ -1201,6 +1201,34 @@ body {
   line-height: 1.45;
 }
 
+.match-availability {
+  margin: 10px 0 14px;
+  border-top: 1px solid var(--border);
+  padding-top: 12px;
+}
+
+.match-availability__grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(210px, 1fr));
+  gap: 8px;
+}
+
+.match-availability__chip {
+  border: 1px solid var(--border);
+  background: var(--background);
+  border-radius: 999px;
+  padding: 8px 12px;
+  font-size: 13px;
+  text-align: left;
+  color: var(--foreground);
+}
+
+.match-availability__chip--off {
+  background: rgba(220, 38, 38, 0.08);
+  color: #991b1b;
+  border-color: rgba(220, 38, 38, 0.3);
+}
+
 /* Seriekort (samma storlek P10 / P11) */
 .fixture-block {
   background: var(--muted);

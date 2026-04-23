@@ -45,7 +45,7 @@ async function api(path, options = {}) {
 const TABS = [
   { id: "players", label: "Spelargrupp" },
   { id: "matches", label: "Matcher" },
-  { id: "overview", label: "Översikt" },
+  { id: "overview", label: "Statistik" },
 ];
 
 const LS_STATE_KEY = "lagval.state.v1";
@@ -529,6 +529,19 @@ function MatchCard({
     if (typeof onCopied === "function") onCopied("Lag kopierat till urklipp.");
   };
 
+  const togglePlayerAvailability = async (player) => {
+    setErr("");
+    try {
+      await api(`/api/players/${player.id}`, {
+        method: "PUT",
+        body: { available: player.available === false },
+      });
+      await load({ silent: true });
+    } catch (x) {
+      setErr(x.message);
+    }
+  };
+
   return (
     <article className="match-card">
       {m.fixture ? <MinFotbollFixture fixture={m.fixture} /> : null}
@@ -656,6 +669,36 @@ function MatchCard({
           )}
         </div>
       </div>
+
+      {m.status !== "played" && (
+        <div className="match-availability" aria-label="Snabb frånvaro">
+          <h4 className="panel__title" style={{ fontSize: 15, margin: "0 0 8px" }}>
+            Snabb frånvaro
+          </h4>
+          <p className="text-muted" style={{ margin: "0 0 8px" }}>
+            Markera spelare som ej tillgänglig direkt här, utan att gå till spelarlistan.
+          </p>
+          <div className="match-availability__grid">
+            {[...(state.players || [])]
+              .sort((a, b) => {
+                if (a.birthYear !== b.birthYear) return a.birthYear - b.birthYear;
+                return a.name.localeCompare(b.name, "sv");
+              })
+              .map((p) => (
+                <button
+                  key={p.id}
+                  type="button"
+                  className={`match-availability__chip${p.available === false ? " match-availability__chip--off" : ""}`}
+                  onClick={() => {
+                    togglePlayerAvailability(p).catch(() => null);
+                  }}
+                >
+                  {p.name} ({p.birthYear}) {p.available === false ? "· Ej tillgänglig" : "· Tillgänglig"}
+                </button>
+              ))}
+          </div>
+        </div>
+      )}
 
       {m.status !== "played" && isP11Series && (
         <div style={{ marginBottom: 12 }}>
@@ -1537,6 +1580,9 @@ export default function App() {
           <p className="panel__lead" style={{ marginTop: 0 }}>
             Nästa grupp i tur: <strong>{rotationView?.nextGroupLabel ?? "Grupp A"}</strong>
           </p>
+          <h3 className="panel__title" style={{ fontSize: 17, margin: "0 0 8px" }}>
+            Matchkalender
+          </h3>
           <div className="calendar-grid" aria-label="Matchkalender">
             {matchesCalendar.map((m) => {
               const st = calendarStatus(m);
