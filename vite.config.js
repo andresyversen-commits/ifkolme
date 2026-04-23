@@ -12,6 +12,8 @@ export default defineConfig({
     react(),
     tailwindcss(),
     VitePWA({
+      // Emergency rollout: remove stale SW/caches on clients stuck on old bundles.
+      selfDestroying: true,
       registerType: "autoUpdate",
       includeAssets: ["icons/icon-192.png", "icons/icon-512.png"],
       manifest: {
