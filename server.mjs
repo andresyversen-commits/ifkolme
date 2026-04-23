@@ -240,6 +240,7 @@ function initialMatches() {
     intendedGroup2016: null,
     selectionExplanation: null,
     comments: [],
+    note: "",
     fixture: null,
   }));
 }
@@ -397,6 +398,10 @@ function migrateStateShape(data) {
     }
     if (!Array.isArray(m.comments)) {
       m.comments = [];
+      dirty = true;
+    }
+    if (typeof m.note !== "string") {
+      m.note = "";
       dirty = true;
     }
     if (m.fixture === undefined) {
@@ -945,6 +950,16 @@ app.post("/api/matches/:id/comments", (req, res) => {
     text,
     timestamp: new Date().toISOString(),
   });
+  writeState(state);
+  res.json(jsonState(state));
+});
+
+app.put("/api/matches/:id/note", (req, res) => {
+  const state = readState();
+  const match = state.matches.find((m) => m.id === req.params.id);
+  if (!match) return res.status(404).json({ error: "Match hittades inte" });
+  const note = String(req.body?.note || "").trim();
+  match.note = note.slice(0, 500);
   writeState(state);
   res.json(jsonState(state));
 });

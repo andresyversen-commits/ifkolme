@@ -511,10 +511,14 @@ function MatchCard({
   const [assistDraft, setAssistDraft] = useState(() => String(m.fixture?.p11Assist2016 ?? 0));
   const [commentName, setCommentName] = useState(() => coachNames[0] || "Jonas");
   const [commentText, setCommentText] = useState("");
+  const [noteDraft, setNoteDraft] = useState(m.note || "");
 
   useEffect(() => {
     setAssistDraft(String(m.fixture?.p11Assist2016 ?? 0));
   }, [m.fixture?.p11Assist2016, m.id]);
+  useEffect(() => {
+    setNoteDraft(m.note || "");
+  }, [m.note, m.id]);
   useEffect(() => {
     if (coachNames.length && !coachNames.includes(commentName)) {
       setCommentName(coachNames[0]);
@@ -569,6 +573,10 @@ function MatchCard({
       lines.push("");
       lines.push("Kommentarer:");
       for (const c of m.comments) lines.push(`- ${c.name} (${formatTimestampSv(c.timestamp)}): ${c.text}`);
+    }
+    if ((m.note || "").trim()) {
+      lines.push("");
+      lines.push(`Notis: ${(m.note || "").trim()}`);
     }
     await navigator.clipboard.writeText(lines.join("\n"));
     setErr("");
@@ -671,6 +679,37 @@ function MatchCard({
 
       <div className="match-comments" aria-label="Kommentarer">
         <h4 className="panel__title" style={{ fontSize: 15, margin: "0 0 8px" }}>
+          Notis
+        </h4>
+        <div className="match-comments__form" style={{ marginBottom: 10 }}>
+          <textarea
+            className="field__input"
+            rows={2}
+            placeholder="Kort intern notis för matchen"
+            value={noteDraft}
+            onChange={(e) => setNoteDraft(e.target.value)}
+          />
+          <button
+            type="button"
+            className="btn btn--secondary"
+            onClick={async () => {
+              setErr("");
+              try {
+                await api(`/api/matches/${m.id}/note`, {
+                  method: "PUT",
+                  body: { note: noteDraft },
+                });
+                await load();
+              } catch (x) {
+                setErr(x.message);
+              }
+            }}
+          >
+            Spara notis
+          </button>
+        </div>
+
+        <h4 className="panel__title" style={{ fontSize: 15, margin: "0 0 8px" }}>
           Kommentarer
         </h4>
         <div className="match-comments__form">
@@ -684,10 +723,22 @@ function MatchCard({
           <textarea
             className="field__input"
             rows={3}
-            placeholder="Skriv kommentar"
+            placeholder="Skriv kommentar (t.ex. sjukdom, transport, byten)"
             value={commentText}
             onChange={(e) => setCommentText(e.target.value)}
           />
+          <div className="btn-row">
+            {["Sjukdom", "Skadad", "Bortrest", "Sen ankomst"].map((preset) => (
+              <button
+                key={preset}
+                type="button"
+                className="btn btn--plain btn--sm"
+                onClick={() => setCommentText((prev) => (prev ? `${prev.trim()} ${preset}` : preset))}
+              >
+                + {preset}
+              </button>
+            ))}
+          </div>
           <button
             type="button"
             className="btn btn--secondary"
@@ -714,7 +765,7 @@ function MatchCard({
           {(m.comments || []).length === 0 ? (
             <p className="text-muted">Inga kommentarer.</p>
           ) : (
-            (m.comments || []).map((c, i) => (
+            [...(m.comments || [])].reverse().map((c, i) => (
               <p key={`${c.timestamp}-${i}`} className="match-comments__item">
                 <strong>{c.name}</strong> ({formatTimestampSv(c.timestamp)}): {c.text}
               </p>
@@ -1843,7 +1894,10 @@ export default function App() {
                                 <CalendarEventCrest name={oppLogo.name} logoUrl={oppLogo.logoUrl} />
                                 <span>{opponent}</span>
                               </div>
-                              <div className="calendar-event__time">{calendarTimeLabel(m)}</div>
+                              <div className="calendar-event__time">
+                                {calendarTimeLabel(m)}
+                                <span className="calendar-event__hint">Öppna</span>
+                              </div>
                             </button>
                           );
                         })}
