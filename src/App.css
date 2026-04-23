@@ -2,7 +2,6 @@
 
 :root {
   --page-gutter: clamp(28px, 6vw, 72px);
-  --content-max-width: 1440px;
 }
 
 *,
@@ -39,7 +38,7 @@ body {
 
 .app {
   width: 100%;
-  max-width: var(--content-max-width);
+  max-width: 100%;
   margin: 0 auto;
   padding-top: calc(var(--space) + env(safe-area-inset-top));
   padding-right: var(--page-gutter-safe-right);
@@ -176,12 +175,6 @@ body {
   .app-bottom-nav .segmented__btn {
     min-height: 44px;
     font-size: 13px;
-  }
-}
-
-@media (max-width: 1200px) {
-  :root {
-    --content-max-width: 100%;
   }
 }
 
