@@ -1277,6 +1277,10 @@ body {
   width: 100%;
 }
 
+.lineup-bench-under-pitch .match-card__planned-subs {
+  margin: 0 0 8px;
+}
+
 .season-sim-messages {
   margin: 12px 0 0;
   padding-left: 1.25rem;
@@ -1558,7 +1562,7 @@ body {
 }
 
 .lineup-pitch {
-  margin-top: 14px;
+  margin-top: 8px;
   width: 100%;
   max-width: 100%;
   overflow: hidden;

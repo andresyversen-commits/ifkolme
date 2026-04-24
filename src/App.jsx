@@ -801,18 +801,17 @@ function MatchCard({
     .map((p) => String(substitutionDraftByInPlayer[p.id] || ""))
     .filter(Boolean);
   const substitutionsUnique = new Set(substitutionOutIds).size === substitutionOutIds.length;
-  const plannedSubstitutions = useMemo(
-    () =>
-      (m.lineup?.substitutions || [])
-        .filter((row) => row?.outPlayerId && row?.inPlayerId)
-        .map((row) => ({
-          outPlayerId: row.outPlayerId,
-          inPlayerId: row.inPlayerId,
-          order: Number(row.order || 0),
-        }))
-        .sort((a, b) => a.order - b.order),
-    [m.lineup?.substitutions],
-  );
+  const plannedBenchByInId = useMemo(() => {
+    const map = new Map();
+    for (const bench of benchPlayers) {
+      const outId = String(substitutionDraftByInPlayer[bench.id] || "");
+      if (!outId) continue;
+      map.set(bench.id, outId);
+    }
+    return map;
+  }, [benchPlayers, substitutionDraftByInPlayer]);
+  const plannedBenchPlayers = benchPlayers.filter((p) => plannedBenchByInId.has(p.id));
+  const unassignedBenchPlayers = benchPlayers.filter((p) => !plannedBenchByInId.has(p.id));
 
   const names2015 = selectedRows.filter((p) => p.birthYear === 2015).map((p) => p.name);
   const names2016 = selectedRows.filter((p) => p.birthYear === 2016).map((p) => p.name);
@@ -963,17 +962,6 @@ function MatchCard({
           Grupp 2016 (rotation assist): {groupLabelDisp(m.intendedGroup2016)}
         </p>
       )}
-      {plannedSubstitutions.length > 0 ? (
-        <div className="match-card__planned-subs">
-          <p className="match-card__planned-subs-title">Planerade byten</p>
-          {plannedSubstitutions.map((row, idx) => (
-            <p key={`${row.inPlayerId}-${row.outPlayerId}-${idx}`} className="match-card__planned-subs-item">
-              {playerName(row.inPlayerId)} in för {playerName(row.outPlayerId)}
-            </p>
-          ))}
-        </div>
-      ) : null}
-
       <div className="segmented segmented--nested segmented--match-tabs" role="tablist" aria-label="Matchdetaljer">
         <button
           type="button"
@@ -1226,11 +1214,25 @@ function MatchCard({
                     Formation {formationDraft.defenders}-{formationDraft.midfielders}-{formationDraft.attackers}
                   </p>
                 </div>
-                {benchPlayers.length > 0 ? (
-                  <p className="text-muted lineup-bench-under-pitch">
-                    Bänk: {benchPlayers.map((p) => p.name).join(", ")}
-                  </p>
-                ) : null}
+                <div className="lineup-bench-under-pitch">
+                  {plannedBenchPlayers.length > 0 ? (
+                    <div className="match-card__planned-subs">
+                      <p className="match-card__planned-subs-title">Planerade byten</p>
+                      {plannedBenchPlayers.map((bench, idx) => (
+                        <p key={`${bench.id}-${idx}`} className="match-card__planned-subs-item">
+                          {bench.name} in för {playerName(plannedBenchByInId.get(bench.id))}
+                        </p>
+                      ))}
+                    </div>
+                  ) : null}
+                  {unassignedBenchPlayers.length > 0 ? (
+                    <p className="text-muted">
+                      Bänk (ej planerat byte): {unassignedBenchPlayers.map((p) => p.name).join(", ")}
+                    </p>
+                  ) : benchPlayers.length > 0 ? (
+                    <p className="text-muted">Alla bänkspelare har planerade byten.</p>
+                  ) : null}
+                </div>
               </div>
             </div>
           )}
