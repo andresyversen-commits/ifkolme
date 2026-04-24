@@ -605,6 +605,8 @@ function MatchCard({
   const [assistDraft, setAssistDraft] = useState(() => String(m.fixture?.p11Assist2016 ?? 0));
   const [commentName, setCommentName] = useState(() => coachNames[0] || "Jonas");
   const [commentText, setCommentText] = useState("");
+  const [editingCommentId, setEditingCommentId] = useState("");
+  const [editingCommentText, setEditingCommentText] = useState("");
   const [formationDraft, setFormationDraft] = useState(() => ({
     defenders: Number(m.lineup?.formation?.defenders || 2),
     midfielders: Number(m.lineup?.formation?.midfielders || 2),
@@ -613,6 +615,7 @@ function MatchCard({
   const sideDraft = "vänster";
   const [matchSubTab, setMatchSubTab] = useState("squad");
   const [positionDraftByPlayer, setPositionDraftByPlayer] = useState({});
+  const [substitutionDraftByInPlayer, setSubstitutionDraftByInPlayer] = useState({});
   const lineupDraftSignatureRef = useRef("");
   const [matchDialog, setMatchDialog] = useState(null);
   const [reportForm, setReportForm] = useState({
@@ -667,6 +670,13 @@ function MatchCard({
       if (slot) next[row.playerId] = slot.key;
     }
     setPositionDraftByPlayer(next);
+    const nextSubs = {};
+    for (const row of m.lineup?.substitutions || []) {
+      const inId = String(row?.inPlayerId || "");
+      const outId = String(row?.outPlayerId || "");
+      if (inId && outId) nextSubs[inId] = outId;
+    }
+    setSubstitutionDraftByInPlayer(nextSubs);
   }, [m.id, m.lineup, m.selectedPlayerIds, state.players]);
   useEffect(() => {
     setMatchSubTab("squad");
@@ -676,6 +686,10 @@ function MatchCard({
       setCommentName(coachNames[0]);
     }
   }, [coachNames, commentName]);
+  useEffect(() => {
+    setEditingCommentId("");
+    setEditingCommentText("");
+  }, [m.id]);
 
   useEffect(() => {
     setMatchDialog(null);
@@ -778,6 +792,26 @@ function MatchCard({
   const benchPlayers = useMemo(
     () => selectedRows.filter((p) => (positionDraftByPlayer[p.id] || "bench") === "bench"),
     [selectedRows, positionDraftByPlayer],
+  );
+  const starterPlayers = useMemo(() => {
+    const ids = [slotToPlayer.gk, ...outfieldSlots.map((slot) => slotToPlayer[slot.key])].filter(Boolean);
+    return ids.map((id) => selectedById.get(id)).filter(Boolean);
+  }, [slotToPlayer, outfieldSlots, selectedById]);
+  const substitutionOutIds = benchPlayers
+    .map((p) => String(substitutionDraftByInPlayer[p.id] || ""))
+    .filter(Boolean);
+  const substitutionsUnique = new Set(substitutionOutIds).size === substitutionOutIds.length;
+  const plannedSubstitutions = useMemo(
+    () =>
+      (m.lineup?.substitutions || [])
+        .filter((row) => row?.outPlayerId && row?.inPlayerId)
+        .map((row) => ({
+          outPlayerId: row.outPlayerId,
+          inPlayerId: row.inPlayerId,
+          order: Number(row.order || 0),
+        }))
+        .sort((a, b) => a.order - b.order),
+    [m.lineup?.substitutions],
   );
 
   const names2015 = selectedRows.filter((p) => p.birthYear === 2015).map((p) => p.name);
@@ -929,6 +963,16 @@ function MatchCard({
           Grupp 2016 (rotation assist): {groupLabelDisp(m.intendedGroup2016)}
         </p>
       )}
+      {plannedSubstitutions.length > 0 ? (
+        <div className="match-card__planned-subs">
+          <p className="match-card__planned-subs-title">Planerade byten</p>
+          {plannedSubstitutions.map((row, idx) => (
+            <p key={`${row.inPlayerId}-${row.outPlayerId}-${idx}`} className="match-card__planned-subs-item">
+              {playerName(row.inPlayerId)} in för {playerName(row.outPlayerId)}
+            </p>
+          ))}
+        </div>
+      ) : null}
 
       <div className="segmented segmented--nested segmented--match-tabs" role="tablist" aria-label="Matchdetaljer">
         <button
@@ -956,7 +1000,7 @@ function MatchCard({
           aria-selected={matchSubTab === "notes"}
           onClick={() => setMatchSubTab("notes")}
         >
-          Tavla
+          Meddelanden
         </button>
       </div>
 
@@ -1060,11 +1104,45 @@ function MatchCard({
                 {startersUnique && !startersReady ? (
                   <p className="text-muted">Varning: inte alla positioner är fyllda än. Du kan ändå spara utkastet.</p>
                 ) : null}
+                {benchPlayers.length > 0 ? (
+                  <div className="lineup-substitutions">
+                    <p className="text-muted" style={{ marginBottom: 6 }}>
+                      Byten (valfritt): välj vem varje bänkspelare ska byta med.
+                    </p>
+                    {benchPlayers.map((bench) => (
+                      <div key={`sub-${bench.id}`} className="field">
+                        <span className="field__label">
+                          {bench.name} {bench.jerseyNumber ? `#${bench.jerseyNumber}` : ""}
+                        </span>
+                        <select
+                          className="field__select"
+                          value={substitutionDraftByInPlayer[bench.id] || ""}
+                          onChange={(e) =>
+                            setSubstitutionDraftByInPlayer((prev) => ({
+                              ...prev,
+                              [bench.id]: e.target.value,
+                            }))
+                          }
+                        >
+                          <option value="">Ingen planerad ersättning</option>
+                          {starterPlayers.map((starter) => (
+                            <option key={`sub-opt-${bench.id}-${starter.id}`} value={starter.id}>
+                              {starter.name} {starter.jerseyNumber ? `#${starter.jerseyNumber}` : ""}
+                            </option>
+                          ))}
+                        </select>
+                      </div>
+                    ))}
+                    {!substitutionsUnique ? (
+                      <p className="text-muted">En startspelare kan bara väljas för ett planerat byte.</p>
+                    ) : null}
+                  </div>
+                ) : null}
                 <div className="btn-row" style={{ marginTop: 6 }}>
                   <button
                     type="button"
                     className="btn btn--primary"
-                    disabled={formationTotal !== 6 || !startersUnique}
+                    disabled={formationTotal !== 6 || !startersUnique || !substitutionsUnique}
                     onClick={async () => {
                       setErr("");
                       try {
@@ -1083,13 +1161,21 @@ function MatchCard({
                               : null,
                           ),
                         ].filter(Boolean);
+                        const substitutions = benchPlayers
+                          .map((bench, idx) => ({
+                            order: idx + 1,
+                            outPlayerId: String(substitutionDraftByInPlayer[bench.id] || ""),
+                            inPlayerId: bench.id,
+                            note: "",
+                          }))
+                          .filter((row) => row.outPlayerId && row.inPlayerId);
                         await api(`/api/matches/${m.id}/lineup`, {
                           method: "PUT",
                           body: {
                             formation: formationDraft,
                             side: sideDraft,
                             starters,
-                            substitutions: [],
+                            substitutions,
                           },
                         });
                         await load();
@@ -1152,9 +1238,9 @@ function MatchCard({
       )}
       {matchSubTab === "lineup" && m.selectedPlayerIds.length === 0 && <p className="text-muted">Välj lag först för att sätta laguppställning.</p>}
 
-      {matchSubTab === "notes" && <div className="match-comments" aria-label="Tavla">
+      {matchSubTab === "notes" && <div className="match-comments" aria-label="Meddelanden">
         <h4 className="panel__title" style={{ fontSize: 15, margin: "0 0 8px" }}>
-          Tavla
+          Meddelanden
         </h4>
         <div className="match-comments__form">
           <select className="field__select" value={commentName} onChange={(e) => setCommentName(e.target.value)}>
@@ -1167,7 +1253,7 @@ function MatchCard({
           <textarea
             className="field__input"
             rows={3}
-            placeholder="Skriv tavlepost (t.ex. sjukdom, transport, byten)"
+            placeholder="Skriv meddelande (t.ex. sjukdom, transport, byten)"
             value={commentText}
             onChange={(e) => setCommentText(e.target.value)}
           />
@@ -1190,17 +1276,101 @@ function MatchCard({
               }
             }}
           >
-            Lägg till post
+            Lägg till meddelande
           </button>
         </div>
         <div className="match-comments__list">
           {(m.comments || []).length === 0 ? (
-            <p className="text-muted">Inga tavleposter.</p>
+            <p className="text-muted">Inga meddelanden.</p>
           ) : (
             [...(m.comments || [])].reverse().map((c, i) => (
-              <p key={`${c.timestamp}-${i}`} className="match-comments__item">
-                <strong>{c.name}</strong> ({formatTimestampSv(c.timestamp)}): {c.text}
-              </p>
+              <div key={c.id || `${c.timestamp}-${i}`} className="match-comments__item">
+                <p style={{ margin: 0 }}>
+                  <strong>{c.name}</strong> ({formatTimestampSv(c.timestamp)}):{" "}
+                  {editingCommentId === (c.id || "") ? (
+                    <textarea
+                      className="field__input"
+                      rows={2}
+                      value={editingCommentText}
+                      onChange={(e) => setEditingCommentText(e.target.value)}
+                      style={{ marginTop: 6 }}
+                    />
+                  ) : (
+                    c.text
+                  )}
+                </p>
+                <div className="btn-row" style={{ marginTop: 6 }}>
+                  {editingCommentId === (c.id || "") ? (
+                    <>
+                      <button
+                        type="button"
+                        className="btn btn--secondary btn--sm"
+                        onClick={() => {
+                          setEditingCommentId("");
+                          setEditingCommentText("");
+                        }}
+                      >
+                        Avbryt
+                      </button>
+                      <button
+                        type="button"
+                        className="btn btn--primary btn--sm"
+                        onClick={async () => {
+                          const t = editingCommentText.trim();
+                          if (!t) return;
+                          setErr("");
+                          try {
+                            await api(`/api/matches/${m.id}/comments/${c.id}`, {
+                              method: "PUT",
+                              body: { text: t },
+                            });
+                            setEditingCommentId("");
+                            setEditingCommentText("");
+                            await load();
+                          } catch (x) {
+                            setErr(x.message);
+                          }
+                        }}
+                      >
+                        Spara
+                      </button>
+                    </>
+                  ) : (
+                    <>
+                      <button
+                        type="button"
+                        className="btn btn--secondary btn--sm"
+                        onClick={() => {
+                          setEditingCommentId(String(c.id || ""));
+                          setEditingCommentText(String(c.text || ""));
+                        }}
+                      >
+                        Redigera
+                      </button>
+                      <button
+                        type="button"
+                        className="btn btn--danger btn--sm"
+                        onClick={async () => {
+                          if (!confirm("Ta bort detta meddelande?")) return;
+                          setErr("");
+                          try {
+                            await api(`/api/matches/${m.id}/comments/${c.id}`, { method: "DELETE" });
+                            if (editingCommentId === c.id) {
+                              setEditingCommentId("");
+                              setEditingCommentText("");
+                            }
+                            await load();
+                          } catch (x) {
+                            setErr(x.message);
+                          }
+                        }}
+                      >
+                        Ta bort
+                      </button>
+                    </>
+                  )}
+                </div>
+              </div>
             ))
           )}
         </div>
@@ -2245,7 +2415,7 @@ export default function App() {
     const wb = XLSX.utils.book_new();
     XLSX.utils.book_append_sheet(wb, wsPlayers, "Spelare");
     XLSX.utils.book_append_sheet(wb, wsMatches, "Matcher");
-    XLSX.utils.book_append_sheet(wb, wsComments, "Tavla");
+    XLSX.utils.book_append_sheet(wb, wsComments, "Meddelanden");
     const xlsxArray = XLSX.write(wb, { bookType: "xlsx", type: "array" });
     const xlsxBlob = new Blob([xlsxArray], {
       type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
@@ -2830,7 +3000,7 @@ export default function App() {
           {matchBoardItems.length > 0 ? (
             <div className="group" style={{ padding: 12, marginBottom: 12 }}>
               <p className="panel__lead" style={{ margin: "0 0 8px" }}>
-                Tavla: viktiga besked
+                Meddelanden: viktiga besked
               </p>
               <div className="match-board">
                 {matchBoardItems.map((item) => (
@@ -2844,7 +3014,7 @@ export default function App() {
                     <div className="match-board__opponent">{item.opponent}</div>
                     <p className="match-board__note">
                       {item.latestAuthor ? <strong>{item.latestAuthor}: </strong> : null}
-                      {item.latestText || "Ingen tavletext."}
+                      {item.latestText || "Inget meddelande."}
                     </p>
                   </button>
                 ))}
@@ -2940,7 +3110,7 @@ export default function App() {
                                   <span className={`calendar-match__dot ${st.cls}`} aria-hidden />
                                   <strong>{branchLabel}</strong>
                                   <span className="calendar-agenda__matchnr">#{m.number}</span>
-                                  {hasUpdate ? <span className="calendar-event__update">Tavla</span> : null}
+                                  {hasUpdate ? <span className="calendar-event__update">Medd.</span> : null}
                                 </div>
                                 <div className="calendar-agenda__opponent">
                                   <CalendarEventCrest name={oppLogo.name} logoUrl={oppLogo.logoUrl} />
@@ -2985,7 +3155,7 @@ export default function App() {
                                     <div className="calendar-event__top">
                                       <span className={`calendar-match__dot ${st.cls}`} aria-hidden />
                                       <strong>{branchLabel}</strong>
-                                      {hasUpdate ? <span className="calendar-event__update">Tavla</span> : null}
+                                      {hasUpdate ? <span className="calendar-event__update">Medd.</span> : null}
                                     </div>
                                     <div className="calendar-event__opponent">
                                       <CalendarEventCrest name={oppLogo.name} logoUrl={oppLogo.logoUrl} />

@@ -1358,6 +1358,10 @@ body {
   justify-content: flex-start;
 }
 
+.lineup-substitutions {
+  margin-top: 8px;
+}
+
 /* Laddning / tomt */
 .app-state {
   display: flex;
@@ -1467,6 +1471,29 @@ body {
 .match-card__lineup-breakdown {
   color: var(--muted-foreground);
   font-weight: 500;
+}
+
+.match-card__planned-subs {
+  margin: 0 0 10px;
+  border: 1px solid var(--separator);
+  border-radius: 10px;
+  background: color-mix(in oklab, var(--fill) 78%, white);
+  padding: 8px 10px;
+}
+
+.match-card__planned-subs-title {
+  margin: 0 0 4px;
+  font-size: 12px;
+  font-weight: 700;
+  color: var(--text-secondary);
+  text-transform: uppercase;
+  letter-spacing: 0.02em;
+}
+
+.match-card__planned-subs-item {
+  margin: 0;
+  font-size: 14px;
+  color: var(--foreground);
 }
 
 /* Trupp på matchkort — samma namn-/år-stil som översikt (.stat-row__*) */
@@ -1637,7 +1664,7 @@ body {
   max-width: min(140px, 42vw);
   border: 1px solid rgb(255 255 255 / 0.7);
   border-radius: 999px;
-  background: rgb(255 255 255 / 0.18);
+  background: rgb(30 64 175 / 0.72);
   box-shadow: 0 8px 14px rgb(0 0 0 / 0.2);
   color: #fff;
   padding: 4px 8px;
@@ -1648,7 +1675,7 @@ body {
 }
 
 .lineup-pitch__player--goalkeeper {
-  background: rgb(37 99 235 / 0.55);
+  background: rgb(234 88 12 / 0.86);
 }
 
 .lineup-pitch__number {

@@ -627,6 +627,11 @@ function normalizeLineup(raw) {
   return { formation, side, starters, substitutions };
 }
 
+function makeCommentId() {
+  if (globalThis.crypto?.randomUUID) return globalThis.crypto.randomUUID();
+  return `c-${Date.now()}-${Math.random().toString(36).slice(2, 9)}`;
+}
+
 function normalizeMatchReportPayload(raw) {
   const o = raw && typeof raw === "object" && !Array.isArray(raw) ? raw : {};
   const result = String(o.result ?? "").trim().slice(0, 40);
@@ -719,6 +724,20 @@ function migrateStateShape(data) {
       m.comments = [];
       dirty = true;
     }
+    if (Array.isArray(m.comments)) {
+      const normalizedComments = m.comments
+        .map((c) => ({
+          id: String(c?.id || "").trim() || makeCommentId(),
+          name: String(c?.name || "").trim(),
+          text: String(c?.text || "").trim(),
+          timestamp: String(c?.timestamp || "").trim() || new Date().toISOString(),
+        }))
+        .filter((c) => c.name && c.text);
+      if (JSON.stringify(normalizedComments) !== JSON.stringify(m.comments)) {
+        m.comments = normalizedComments;
+        dirty = true;
+      }
+    }
     if (typeof m.note !== "string") {
       m.note = "";
       dirty = true;
@@ -726,11 +745,12 @@ function migrateStateShape(data) {
     const legacyNote = String(m.note || "").trim();
     if (legacyNote) {
       const alreadyMigrated = m.comments.some(
-        (c) => String(c?.name || "").trim() === "Tavla" && String(c?.text || "").trim() === legacyNote,
+        (c) => String(c?.name || "").trim() === "Meddelande" && String(c?.text || "").trim() === legacyNote,
       );
       if (!alreadyMigrated) {
         m.comments.push({
-          name: "Tavla",
+          id: makeCommentId(),
+          name: "Meddelande",
           text: legacyNote,
           timestamp: new Date().toISOString(),
         });
@@ -1548,10 +1568,42 @@ app.post("/api/matches/:id/comments", async (req, res) => {
   if (!text) return res.status(400).json({ error: "Kommentaren är tom" });
   if (!Array.isArray(match.comments)) match.comments = [];
   match.comments.push({
+    id: makeCommentId(),
     name,
     text,
     timestamp: new Date().toISOString(),
   });
+  await writeState(state);
+  res.json(jsonState(state));
+});
+
+app.put("/api/matches/:id/comments/:commentId", async (req, res) => {
+  const state = await readState();
+  const match = state.matches.find((m) => m.id === req.params.id);
+  if (!match) return res.status(404).json({ error: "Match hittades inte" });
+  const commentId = String(req.params.commentId || "").trim();
+  if (!commentId) return res.status(400).json({ error: "Kommentar-ID saknas" });
+  if (!Array.isArray(match.comments)) match.comments = [];
+  const idx = match.comments.findIndex((c) => String(c?.id || "") === commentId);
+  if (idx < 0) return res.status(404).json({ error: "Kommentaren hittades inte" });
+  const text = String(req.body?.text || "").trim();
+  if (!text) return res.status(400).json({ error: "Kommentaren är tom" });
+  match.comments[idx].text = text.slice(0, 500);
+  match.comments[idx].editedAt = new Date().toISOString();
+  await writeState(state);
+  res.json(jsonState(state));
+});
+
+app.delete("/api/matches/:id/comments/:commentId", async (req, res) => {
+  const state = await readState();
+  const match = state.matches.find((m) => m.id === req.params.id);
+  if (!match) return res.status(404).json({ error: "Match hittades inte" });
+  const commentId = String(req.params.commentId || "").trim();
+  if (!commentId) return res.status(400).json({ error: "Kommentar-ID saknas" });
+  if (!Array.isArray(match.comments)) match.comments = [];
+  const next = match.comments.filter((c) => String(c?.id || "") !== commentId);
+  if (next.length === match.comments.length) return res.status(404).json({ error: "Kommentaren hittades inte" });
+  match.comments = next;
   await writeState(state);
   res.json(jsonState(state));
 });
@@ -1564,7 +1616,8 @@ app.put("/api/matches/:id/note", async (req, res) => {
   if (note) {
     if (!Array.isArray(match.comments)) match.comments = [];
     match.comments.push({
-      name: "Tavla",
+      id: makeCommentId(),
+      name: "Meddelande",
       text: note.slice(0, 500),
       timestamp: new Date().toISOString(),
     });
