@@ -601,6 +601,7 @@ function MatchCard({
   const sideDraft = "vänster";
   const [matchSubTab, setMatchSubTab] = useState("squad");
   const [positionDraftByPlayer, setPositionDraftByPlayer] = useState({});
+  const lineupDraftSignatureRef = useRef("");
   const [matchDialog, setMatchDialog] = useState(null);
   const [reportForm, setReportForm] = useState({
     result: "",
@@ -617,6 +618,25 @@ function MatchCard({
     setNoteDraft(m.note || "");
   }, [m.note, m.id]);
   useEffect(() => {
+    const lineupSig = JSON.stringify({
+      id: m.id,
+      selected: (m.selectedPlayerIds || []).slice().sort(),
+      formation: {
+        defenders: Number(m.lineup?.formation?.defenders || 2),
+        midfielders: Number(m.lineup?.formation?.midfielders || 2),
+        attackers: Number(m.lineup?.formation?.attackers || 2),
+      },
+      starters: (m.lineup?.starters || [])
+        .map((row) => ({
+          playerId: row?.playerId || "",
+          role: row?.role || "",
+          order: Number(row?.order || 0),
+        }))
+        .sort((a, b) => (a.order - b.order) || a.playerId.localeCompare(b.playerId)),
+    });
+    if (lineupDraftSignatureRef.current === lineupSig) return;
+    lineupDraftSignatureRef.current = lineupSig;
+
     const formation = {
       defenders: Number(m.lineup?.formation?.defenders || 2),
       midfielders: Number(m.lineup?.formation?.midfielders || 2),
@@ -2309,7 +2329,7 @@ export default function App() {
           <img className="app-header__logo" src="/logos/ifk-olme.png" alt="IFK Ölme" />
           <div>
             <h1 className="app-title">Lagval</h1>
-            <p className="app-footnote">Olme IF · ungdom{buildInfo?.version ? ` · v${buildInfo.version}` : ""}{buildInfo?.commit ? ` · ${String(buildInfo.commit).slice(0, 7)}` : ""}</p>
+            <p className="app-footnote">IFK Ölme - 2015/2016</p>
           </div>
         </div>
         <div className="app-header__actions">
