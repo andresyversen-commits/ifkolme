@@ -283,10 +283,12 @@ function MinFotbollFixture({ fixture, getStoredTeamLogo }) {
   if (!fixture) return null;
   const homeTeam = String(fixture.home || fixture.homeTeam || "").trim();
   const awayTeam = String(fixture.away || fixture.awayTeam || "").trim();
+  const venue = String(fixture.venue || "").trim();
   const dateLabel = formatFixtureDateSv(fixture.date);
   const timeIsPlaceholder = fixture.time === "00:00";
   const homeLogo = fixture.homeLogo || fixture.home_logo || getStoredTeamLogo?.(homeTeam);
   const awayLogo = fixture.awayLogo || fixture.away_logo || getStoredTeamLogo?.(awayTeam);
+  const mapsUrl = venue ? `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(venue)}` : "";
   return (
     <div className="fixture-block">
       <header className="fixture-block__head">
@@ -299,7 +301,18 @@ function MinFotbollFixture({ fixture, getStoredTeamLogo }) {
           <span className="fixture-block__club">{homeTeam || "Hemmalag"}</span>
         </div>
         <div className="fixture-block__center">
-          {fixture.venue ? <span className="fixture-block__venue">{fixture.venue}</span> : null}
+          {venue ? (
+            <a
+              className="fixture-block__venue fixture-block__venue-link"
+              href={mapsUrl}
+              target="_blank"
+              rel="noreferrer"
+              title="Öppna i Google Maps"
+            >
+              {venue}
+              <span className="fixture-block__venue-hint">Tryck för vägbeskrivning</span>
+            </a>
+          ) : null}
           {timeIsPlaceholder ? (
             <span className="fixture-time-tbd">TBD</span>
           ) : (
@@ -592,7 +605,6 @@ function MatchCard({
   const [assistDraft, setAssistDraft] = useState(() => String(m.fixture?.p11Assist2016 ?? 0));
   const [commentName, setCommentName] = useState(() => coachNames[0] || "Jonas");
   const [commentText, setCommentText] = useState("");
-  const [noteDraft, setNoteDraft] = useState(m.note || "");
   const [formationDraft, setFormationDraft] = useState(() => ({
     defenders: Number(m.lineup?.formation?.defenders || 2),
     midfielders: Number(m.lineup?.formation?.midfielders || 2),
@@ -614,9 +626,6 @@ function MatchCard({
   useEffect(() => {
     setAssistDraft(String(m.fixture?.p11Assist2016 ?? 0));
   }, [m.fixture?.p11Assist2016, m.id]);
-  useEffect(() => {
-    setNoteDraft(m.note || "");
-  }, [m.note, m.id]);
   useEffect(() => {
     const lineupSig = JSON.stringify({
       id: m.id,
@@ -757,6 +766,10 @@ function MatchCard({
   const starterIds = Object.values(slotToPlayer).filter(Boolean);
   const startersUnique = new Set(starterIds).size === starterIds.length;
   const startersReady = Boolean(slotToPlayer.gk) && outfieldSlots.every((slot) => Boolean(slotToPlayer[slot.key])) && startersUnique;
+  const savedLineupCount = Math.min(
+    7,
+    new Set((m.lineup?.starters || []).map((row) => String(row?.playerId || "")).filter(Boolean)).size,
+  );
   const selectedById = useMemo(() => {
     const map = new Map();
     for (const p of selectedRows) map.set(p.id, p);
@@ -786,10 +799,6 @@ function MatchCard({
       lines.push("");
       lines.push("Kommentarer:");
       for (const c of m.comments) lines.push(`- ${c.name} (${formatTimestampSv(c.timestamp)}): ${c.text}`);
-    }
-    if ((m.note || "").trim()) {
-      lines.push("");
-      lines.push(`Notis: ${(m.note || "").trim()}`);
     }
     if (m.lineup?.starters?.length) {
       lines.push("");
@@ -867,6 +876,11 @@ function MatchCard({
               {m.matchReport.opponentRating}/5
             </span>
           ) : null}
+          {m.selectedPlayerIds?.length ? (
+            <span className="match-card__lineup-progress" title="Sparad startuppställning">
+              Startuppställning: {savedLineupCount}/7 fyllda
+            </span>
+          ) : null}
           {m.status === "played" && (
             <button type="button" className="btn btn--secondary btn--sm match-card__report-btn" onClick={openReportDialog}>
               Rapport
@@ -942,7 +956,7 @@ function MatchCard({
           aria-selected={matchSubTab === "notes"}
           onClick={() => setMatchSubTab("notes")}
         >
-          Notis & kommentarer
+          Tavla
         </button>
       </div>
 
@@ -1014,42 +1028,7 @@ function MatchCard({
           ) : (
             <div className="lineup-layout">
               <div className="lineup-layout__controls">
-                <div className="lineup-dnd-help">Velg posisjon for hver spiller. Smart-fyll bruker spillerens foretrukne posisjon.</div>
-                <div className="btn-row" style={{ marginBottom: 8 }}>
-                  <button
-                    type="button"
-                    className="btn btn--secondary"
-                    onClick={() => {
-                      const remaining = [...selectedRows];
-                      const slotOrder = ["gk", ...outfieldSlots.map((s) => s.key)];
-                      const next = {};
-                      const pickOne = (predicate) => {
-                        const idx = remaining.findIndex(predicate);
-                        if (idx < 0) return null;
-                        const [p] = remaining.splice(idx, 1);
-                        return p;
-                      };
-                      const gk = pickOne((p) => /målvakt/i.test(p.preferredPosition || "")) || remaining.shift() || null;
-                      if (gk) next[gk.id] = "gk";
-                      for (const slotKey of slotOrder.slice(1)) {
-                        const slot = outfieldSlots.find((s) => s.key === slotKey);
-                        if (!slot) continue;
-                        const pref =
-                          slot.role === "defender"
-                            ? /försvar/i
-                            : slot.role === "midfielder"
-                              ? /mittfält/i
-                              : /anfall/i;
-                        const player = pickOne((p) => pref.test(p.preferredPosition || "")) || pickOne((p) => /allround/i.test(p.preferredPosition || "")) || remaining.shift() || null;
-                        if (player) next[player.id] = slotKey;
-                      }
-                      for (const p of remaining) next[p.id] = "bench";
-                      setPositionDraftByPlayer((prev) => ({ ...prev, ...next }));
-                    }}
-                  >
-                    Smart fyll
-                  </button>
-                </div>
+                <div className="lineup-dnd-help">Velg posisjon for hver spiller.</div>
                 <div className="lineup-player-grid">
                   {selectedRows.map((p) => (
                     <div key={`pos-${p.id}`} className="field">
@@ -1078,23 +1057,32 @@ function MatchCard({
                   ))}
                 </div>
                 {!startersUnique ? <p className="text-muted">En position kan bara ha en spelare. Välj unika positioner.</p> : null}
+                {startersUnique && !startersReady ? (
+                  <p className="text-muted">Varning: inte alla positioner är fyllda än. Du kan ändå spara utkastet.</p>
+                ) : null}
                 <div className="btn-row" style={{ marginTop: 6 }}>
                   <button
                     type="button"
                     className="btn btn--primary"
-                    disabled={formationTotal !== 6 || !startersReady}
+                    disabled={formationTotal !== 6 || !startersUnique}
                     onClick={async () => {
                       setErr("");
                       try {
                         const starters = [
-                          { playerId: slotToPlayer.gk, role: "goalkeeper", lane: "central", order: 0 },
-                          ...outfieldSlots.map((slot) => ({
-                            playerId: slotToPlayer[slot.key],
-                            role: slot.role,
-                            lane: slot.lane,
-                            order: slot.order,
-                          })),
-                        ];
+                          slotToPlayer.gk
+                            ? { playerId: slotToPlayer.gk, role: "goalkeeper", lane: "central", order: 0 }
+                            : null,
+                          ...outfieldSlots.map((slot) =>
+                            slotToPlayer[slot.key]
+                              ? {
+                                  playerId: slotToPlayer[slot.key],
+                                  role: slot.role,
+                                  lane: slot.lane,
+                                  order: slot.order,
+                                }
+                              : null,
+                          ),
+                        ].filter(Boolean);
                         await api(`/api/matches/${m.id}/lineup`, {
                           method: "PUT",
                           body: {
@@ -1164,40 +1152,9 @@ function MatchCard({
       )}
       {matchSubTab === "lineup" && m.selectedPlayerIds.length === 0 && <p className="text-muted">Välj lag först för att sätta laguppställning.</p>}
 
-      {matchSubTab === "notes" && <div className="match-comments" aria-label="Kommentarer">
+      {matchSubTab === "notes" && <div className="match-comments" aria-label="Tavla">
         <h4 className="panel__title" style={{ fontSize: 15, margin: "0 0 8px" }}>
-          Notis
-        </h4>
-        <div className="match-comments__form" style={{ marginBottom: 10 }}>
-          <textarea
-            className="field__input"
-            rows={2}
-            placeholder="Kort intern notis för matchen"
-            value={noteDraft}
-            onChange={(e) => setNoteDraft(e.target.value)}
-          />
-          <button
-            type="button"
-            className="btn btn--secondary"
-            onClick={async () => {
-              setErr("");
-              try {
-                await api(`/api/matches/${m.id}/note`, {
-                  method: "PUT",
-                  body: { note: noteDraft },
-                });
-                await load();
-              } catch (x) {
-                setErr(x.message);
-              }
-            }}
-          >
-            Spara notis
-          </button>
-        </div>
-
-        <h4 className="panel__title" style={{ fontSize: 15, margin: "0 0 8px" }}>
-          Kommentarer
+          Tavla
         </h4>
         <div className="match-comments__form">
           <select className="field__select" value={commentName} onChange={(e) => setCommentName(e.target.value)}>
@@ -1210,7 +1167,7 @@ function MatchCard({
           <textarea
             className="field__input"
             rows={3}
-            placeholder="Skriv kommentar (t.ex. sjukdom, transport, byten)"
+            placeholder="Skriv tavlepost (t.ex. sjukdom, transport, byten)"
             value={commentText}
             onChange={(e) => setCommentText(e.target.value)}
           />
@@ -1233,12 +1190,12 @@ function MatchCard({
               }
             }}
           >
-            Lägg till kommentar
+            Lägg till post
           </button>
         </div>
         <div className="match-comments__list">
           {(m.comments || []).length === 0 ? (
-            <p className="text-muted">Inga kommentarer.</p>
+            <p className="text-muted">Inga tavleposter.</p>
           ) : (
             [...(m.comments || [])].reverse().map((c, i) => (
               <p key={`${c.timestamp}-${i}`} className="match-comments__item">
@@ -2085,6 +2042,23 @@ export default function App() {
     () => matchesCalendar.find((m) => m.id === activeMatchId) || null,
     [matchesCalendar, activeMatchId],
   );
+  const matchBoardItems = useMemo(
+    () =>
+      matchesCalendar
+        .filter((m) => (m.comments || []).length > 0)
+        .map((m) => ({
+          id: m.id,
+          number: m.number,
+          branch: (m.branch || "p10") === "p11" ? "P11" : "P10",
+          opponent: calendarOpponentName(m),
+          commentsCount: (m.comments || []).length,
+          latestText: String((m.comments || [])[m.comments.length - 1]?.text || "").trim(),
+          latestAuthor: String((m.comments || [])[m.comments.length - 1]?.name || "").trim(),
+          updatedAt: (m.comments || [])[m.comments.length - 1]?.timestamp || m.fixture?.date || "",
+        }))
+        .sort((a, b) => String(b.updatedAt || "").localeCompare(String(a.updatedAt || ""))),
+    [matchesCalendar],
+  );
   const openMatchDetail = useCallback((matchId) => {
     setActiveMatchId(matchId);
     setShowMatchCalendar(false);
@@ -2271,7 +2245,7 @@ export default function App() {
     const wb = XLSX.utils.book_new();
     XLSX.utils.book_append_sheet(wb, wsPlayers, "Spelare");
     XLSX.utils.book_append_sheet(wb, wsMatches, "Matcher");
-    XLSX.utils.book_append_sheet(wb, wsComments, "Kommentarer");
+    XLSX.utils.book_append_sheet(wb, wsComments, "Tavla");
     const xlsxArray = XLSX.write(wb, { bookType: "xlsx", type: "array" });
     const xlsxBlob = new Blob([xlsxArray], {
       type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
@@ -2853,6 +2827,30 @@ export default function App() {
       {tab === "matches" && (
         <section className="panel matches-page" role="tabpanel" id="panel-matches" aria-labelledby="tab-matches">
           <h2 className="panel__title">Matcher</h2>
+          {matchBoardItems.length > 0 ? (
+            <div className="group" style={{ padding: 12, marginBottom: 12 }}>
+              <p className="panel__lead" style={{ margin: "0 0 8px" }}>
+                Tavla: viktiga besked
+              </p>
+              <div className="match-board">
+                {matchBoardItems.map((item) => (
+                  <button key={item.id} type="button" className="match-board__item" onClick={() => openMatchDetail(item.id)}>
+                    <div className="match-board__head">
+                      <strong>
+                        Match {item.number} · {item.branch}
+                      </strong>
+                      {item.commentsCount > 0 ? <span>{item.commentsCount} kommentar{item.commentsCount > 1 ? "er" : ""}</span> : null}
+                    </div>
+                    <div className="match-board__opponent">{item.opponent}</div>
+                    <p className="match-board__note">
+                      {item.latestAuthor ? <strong>{item.latestAuthor}: </strong> : null}
+                      {item.latestText || "Ingen tavletext."}
+                    </p>
+                  </button>
+                ))}
+              </div>
+            </div>
+          ) : null}
 
           {rotationView && rotationView.groupsValid === false && (
             <div className="banner banner--error" role="status">
@@ -2914,7 +2912,7 @@ export default function App() {
                         const branchLabel = (m.branch || "p10") === "p11" ? "P11" : "P10";
                         const opponent = calendarOpponentName(m);
                         const oppLogo = calendarOpponentLogo(m);
-                        const hasUpdate = Boolean((m.note || "").trim()) || (m.comments || []).length > 0;
+                        const hasUpdate = (m.comments || []).length > 0;
                         const dt = parseIsoDateLocal(m.fixture?.date);
                         const dayNum = dt ? dt.getDate() : "";
                         const dow = dt
@@ -2942,7 +2940,7 @@ export default function App() {
                                   <span className={`calendar-match__dot ${st.cls}`} aria-hidden />
                                   <strong>{branchLabel}</strong>
                                   <span className="calendar-agenda__matchnr">#{m.number}</span>
-                                  {hasUpdate ? <span className="calendar-event__update">Notis</span> : null}
+                                  {hasUpdate ? <span className="calendar-event__update">Tavla</span> : null}
                                 </div>
                                 <div className="calendar-agenda__opponent">
                                   <CalendarEventCrest name={oppLogo.name} logoUrl={oppLogo.logoUrl} />
@@ -2975,7 +2973,7 @@ export default function App() {
                                 const branchLabel = (match.branch || "p10") === "p11" ? "P11" : "P10";
                                 const opponent = calendarOpponentName(match);
                                 const oppLogo = calendarOpponentLogo(match);
-                                const hasUpdate = Boolean((match.note || "").trim()) || (match.comments || []).length > 0;
+                                const hasUpdate = (match.comments || []).length > 0;
                                 return (
                                   <button
                                     key={match.id}
@@ -2987,7 +2985,7 @@ export default function App() {
                                     <div className="calendar-event__top">
                                       <span className={`calendar-match__dot ${st.cls}`} aria-hidden />
                                       <strong>{branchLabel}</strong>
-                                      {hasUpdate ? <span className="calendar-event__update">Notis</span> : null}
+                                      {hasUpdate ? <span className="calendar-event__update">Tavla</span> : null}
                                     </div>
                                     <div className="calendar-event__opponent">
                                       <CalendarEventCrest name={oppLogo.name} logoUrl={oppLogo.logoUrl} />

@@ -723,6 +723,21 @@ function migrateStateShape(data) {
       m.note = "";
       dirty = true;
     }
+    const legacyNote = String(m.note || "").trim();
+    if (legacyNote) {
+      const alreadyMigrated = m.comments.some(
+        (c) => String(c?.name || "").trim() === "Tavla" && String(c?.text || "").trim() === legacyNote,
+      );
+      if (!alreadyMigrated) {
+        m.comments.push({
+          name: "Tavla",
+          text: legacyNote,
+          timestamp: new Date().toISOString(),
+        });
+      }
+      m.note = "";
+      dirty = true;
+    }
     if (m.lineup === undefined) {
       m.lineup = null;
       dirty = true;
@@ -1311,8 +1326,8 @@ app.put("/api/matches/:id/lineup", async (req, res) => {
   }
   const gkCount = lineup.starters.filter((row) => row.role === "goalkeeper").length;
   const outfieldCount = lineup.starters.filter((row) => row.role !== "goalkeeper").length;
-  if (gkCount !== 1 || outfieldCount !== 6) {
-    return res.status(400).json({ error: "Startelvan måste ha exakt 1 målvakt och 6 utespelare." });
+  if (gkCount > 1 || outfieldCount > 6) {
+    return res.status(400).json({ error: "Startelvan kan ha högst 1 målvakt och 6 utespelare." });
   }
   const unique = new Set(lineup.starters.map((row) => row.playerId));
   if (unique.size !== lineup.starters.length) {
@@ -1546,7 +1561,15 @@ app.put("/api/matches/:id/note", async (req, res) => {
   const match = state.matches.find((m) => m.id === req.params.id);
   if (!match) return res.status(404).json({ error: "Match hittades inte" });
   const note = String(req.body?.note || "").trim();
-  match.note = note.slice(0, 500);
+  if (note) {
+    if (!Array.isArray(match.comments)) match.comments = [];
+    match.comments.push({
+      name: "Tavla",
+      text: note.slice(0, 500),
+      timestamp: new Date().toISOString(),
+    });
+  }
+  match.note = "";
   await writeState(state);
   res.json(jsonState(state));
 });
