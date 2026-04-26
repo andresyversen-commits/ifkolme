@@ -199,7 +199,8 @@ function parseMonthKey(key) {
 }
 
 /** Truppvisning: samma namn-/år-typografi som översikten, sorterat 2015 först. */
-function MatchLineupNames({ playerIds, players, canToggleAvailability = false, onToggleAvailability }) {
+function MatchLineupNames({ playerIds, players, declinedPlayerIds = [], canToggleAvailability = false, onToggleAvailability }) {
+  const declinedSet = useMemo(() => new Set(declinedPlayerIds || []), [declinedPlayerIds]);
   const rows = useMemo(() => {
     return [...playerIds]
       .map((id) => players.find((p) => p.id === id))
@@ -217,6 +218,7 @@ function MatchLineupNames({ playerIds, players, canToggleAvailability = false, o
         <li key={p.id} className="lineup-list__row">
           <span className="lineup-list__name">
             {p.name}
+            {declinedSet.has(p.id) ? <span className="lineup-list__status">Tackat nej</span> : null}
             {p.available === false ? <span className="lineup-list__status">Ej tillgänglig</span> : null}
           </span>
           <span className="lineup-list__year">{p.birthYear}</span>
@@ -760,7 +762,16 @@ function MatchCard({
 
   const p11Manual2016Ok = !showManual2016 || manual2016Ids.length === assist2016Target;
   const matchNo = displayNumber ?? m.number;
+  const declinedPlayerIds = Array.isArray(m.declinedPlayerIds) ? m.declinedPlayerIds : [];
+  const declinedSet = new Set(declinedPlayerIds);
   const selectedRows = m.selectedPlayerIds
+    .map((id) => state.players.find((p) => p.id === id))
+    .filter(Boolean)
+    .sort((a, b) => {
+      if (a.birthYear !== b.birthYear) return a.birthYear - b.birthYear;
+      return a.name.localeCompare(b.name, "sv");
+    });
+  const declinedRows = declinedPlayerIds
     .map((id) => state.players.find((p) => p.id === id))
     .filter(Boolean)
     .sort((a, b) => {
@@ -868,6 +879,10 @@ function MatchCard({
         Array.isArray(m.selectedPlayerIds) &&
         m.selectedPlayerIds.includes(player.id)
       ) {
+        await api(`/api/matches/${m.id}/decline`, {
+          method: "PUT",
+          body: { playerId: player.id, declined: true },
+        });
         const wantsReplacement = confirm(
           `${player.name} markerades som otillgänglig. Vill du ersätta med nästa spelare i kön nu?`,
         );
@@ -877,6 +892,11 @@ function MatchCard({
           });
           if (typeof onCopied === "function") onCopied("Laget uppdaterat med nästa i kön.");
         }
+      } else if (!willBecomeUnavailable && declinedSet.has(player.id)) {
+        await api(`/api/matches/${m.id}/decline`, {
+          method: "PUT",
+          body: { playerId: player.id, declined: false },
+        });
       }
       await load({ silent: true });
     } catch (x) {
@@ -1008,11 +1028,17 @@ function MatchCard({
             <MatchLineupNames
               playerIds={m.selectedPlayerIds}
               players={state.players}
+              declinedPlayerIds={declinedPlayerIds}
               canToggleAvailability={m.status !== "played"}
               onToggleAvailability={(p) => {
                 togglePlayerAvailability(p).catch(() => null);
               }}
             />
+            {declinedRows.length > 0 ? (
+              <p className="text-muted" style={{ marginTop: 8 }}>
+                Tackat nej: {declinedRows.map((p) => `${p.name} (${p.birthYear})`).join(", ")}
+              </p>
+            ) : null}
           </>
         ) : (
           <p className="text-muted">Inget uttag</p>
@@ -2000,6 +2026,15 @@ export default function App() {
         return a.name.localeCompare(b.name, "sv");
       })
     : [];
+  const declineCountByPlayer = useMemo(() => {
+    const map = new Map();
+    for (const m of state?.matches || []) {
+      for (const id of m?.declinedPlayerIds || []) {
+        map.set(id, (map.get(id) || 0) + 1);
+      }
+    }
+    return map;
+  }, [state?.matches]);
 
   const uniqueAges = state
     ? [...new Set(state.players.map((p) => playerAge(p.birthYear)))].sort((a, b) => a - b)
@@ -3269,11 +3304,12 @@ export default function App() {
           {playersOverview.length === 0 ? (
             <p className="empty-hint">Inga spelare matchar filtren.</p>
           ) : (
-            <div className="stat-list stat-list--4col">
+            <div className="stat-list stat-list--5col">
               <div className="stat-head" aria-hidden>
                 <span>Namn</span>
                 <span>År</span>
                 <span>Antal matcher</span>
+                <span>Tackat nej</span>
                 <span>Senast</span>
               </div>
               {playersOverview.map((p) => (
@@ -3287,6 +3323,7 @@ export default function App() {
                   </p>
                   <span className="stat-row__year">{p.birthYear}</span>
                   <span className="stat-row__value">{p.matchesPlayed}</span>
+                  <span className="stat-row__declined">{declineCountByPlayer.get(p.id) || 0}</span>
                   <span className="stat-row__last">{p.lastPlayedMatchNumber != null ? p.lastPlayedMatchNumber : "—"}</span>
                 </div>
               ))}

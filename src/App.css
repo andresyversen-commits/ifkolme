@@ -654,6 +654,11 @@ body {
   grid-template-columns: minmax(0, 1.2fr) auto auto minmax(3.5rem, auto);
 }
 
+.stat-list--5col .stat-head,
+.stat-list--5col .stat-row {
+  grid-template-columns: minmax(0, 1.2fr) auto auto auto minmax(3.5rem, auto);
+}
+
 .stat-row {
   display: grid;
   grid-template-columns: 1fr auto minmax(3rem, auto);
@@ -722,7 +727,21 @@ body {
   text-align: right;
 }
 
+.stat-list--5col .stat-head span:nth-child(3),
+.stat-list--5col .stat-head span:nth-child(4),
+.stat-list--5col .stat-head span:nth-child(5) {
+  text-align: right;
+}
+
 .stat-list--4col .stat-row__last {
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+  font-weight: 600;
+  font-size: 17px;
+}
+
+.stat-list--5col .stat-row__declined,
+.stat-list--5col .stat-row__last {
   text-align: right;
   font-variant-numeric: tabular-nums;
   font-weight: 600;

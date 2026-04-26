@@ -480,6 +480,7 @@ export function selectTeamForMatch(state, matchId, opts = {}) {
   const match = state.matches.find((m) => m.id === matchId);
   if (!match) throw new Error("match_not_found");
   if (match.status === "played") throw new Error("match_already_played");
+  match.declinedPlayerIds = [];
 
   repairGroups2015IfNeeded(state);
   repairGroups2016IfNeeded(state);

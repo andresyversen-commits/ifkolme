@@ -477,6 +477,7 @@ function initialMatches() {
     status: "not_played",
     selectedPlayerIds: [],
     selectedPlayers: [],
+    declinedPlayerIds: [],
     intendedGroup2015: null,
     group2015: null,
     intendedGroup2016: null,
@@ -708,6 +709,16 @@ function migrateStateShape(data) {
       m.selectedPlayers = Array.isArray(m.selectedPlayerIds) ? [...m.selectedPlayerIds] : [];
       dirty = true;
     }
+    if (!Array.isArray(m.declinedPlayerIds)) {
+      m.declinedPlayerIds = [];
+      dirty = true;
+    } else {
+      const normalizedDeclines = [...new Set(m.declinedPlayerIds.map((id) => String(id || "").trim()).filter(Boolean))];
+      if (JSON.stringify(normalizedDeclines) !== JSON.stringify(m.declinedPlayerIds)) {
+        m.declinedPlayerIds = normalizedDeclines;
+        dirty = true;
+      }
+    }
     if (m.intendedGroup2015 === undefined) {
       m.intendedGroup2015 = null;
       dirty = true;
@@ -874,6 +885,7 @@ function migrateStateShape(data) {
         branch: "p11",
         status: "not_played",
         selectedPlayerIds: [],
+        declinedPlayerIds: [],
         intendedGroup2015: null,
         intendedGroup2016: null,
         selectionExplanation: null,
@@ -1536,6 +1548,23 @@ app.put("/api/matches/:id/report", async (req, res) => {
   }
 });
 
+app.put("/api/matches/:id/decline", async (req, res) => {
+  const state = await readState();
+  const match = state.matches.find((m) => m.id === req.params.id);
+  if (!match) return res.status(404).json({ error: "Match hittades inte" });
+  const playerId = String(req.body?.playerId || "").trim();
+  if (!playerId) return res.status(400).json({ error: "Spelar-ID saknas" });
+  const declined = Boolean(req.body?.declined);
+  if (!Array.isArray(match.declinedPlayerIds)) match.declinedPlayerIds = [];
+  const exists = match.declinedPlayerIds.includes(playerId);
+  if (declined && !exists) match.declinedPlayerIds.push(playerId);
+  if (!declined && exists) {
+    match.declinedPlayerIds = match.declinedPlayerIds.filter((id) => id !== playerId);
+  }
+  await writeState(state);
+  res.json(jsonState(state));
+});
+
 /** Ångra match — tar bort genomförd status, återställer rotation utifrån kvarvarande matcher, uppdaterar statistik. */
 app.post("/api/matches/:id/reopen", async (req, res) => {
   const state = await readState();
@@ -1638,6 +1667,7 @@ app.post("/api/reset-season", async (_req, res) => {
   for (const m of state.matches) {
     m.status = "not_played";
     m.selectedPlayerIds = [];
+    m.declinedPlayerIds = [];
     m.intendedGroup2015 = null;
     m.intendedGroup2016 = null;
     m.selectionExplanation = null;
