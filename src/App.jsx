@@ -130,6 +130,74 @@ function createEmptyTestLabState() {
   };
 }
 
+function normalizeTestLabFormation(input) {
+  const raw = input && typeof input === "object" ? input : {};
+  let defenders = Math.max(0, Math.min(6, Math.floor(Number(raw.defenders ?? 0))));
+  let midfielders = Math.max(0, Math.min(6, Math.floor(Number(raw.midfielders ?? 0))));
+  let attackers = Math.max(0, Math.min(6, Math.floor(Number(raw.attackers ?? 0))));
+  const total = 6;
+  const sum = defenders + midfielders + attackers;
+  if (sum === total) return { defenders, midfielders, attackers };
+  if (sum > total) {
+    let excess = sum - total;
+    // Reduce attackers first, then midfielders, then defenders.
+    const take = (key, n) => {
+      const v = { defenders, midfielders, attackers }[key];
+      const dec = Math.min(v, n);
+      if (key === "defenders") defenders -= dec;
+      if (key === "midfielders") midfielders -= dec;
+      if (key === "attackers") attackers -= dec;
+      return n - dec;
+    };
+    excess = take("attackers", excess);
+    excess = take("midfielders", excess);
+    excess = take("defenders", excess);
+    return { defenders, midfielders, attackers };
+  }
+  let missing = total - sum;
+  // Add attackers first, then midfielders, then defenders.
+  const add = (key, n) => {
+    const v = { defenders, midfielders, attackers }[key];
+    const inc = Math.min(6 - v, n);
+    if (key === "defenders") defenders += inc;
+    if (key === "midfielders") midfielders += inc;
+    if (key === "attackers") attackers += inc;
+    return n - inc;
+  };
+  missing = add("attackers", missing);
+  missing = add("midfielders", missing);
+  missing = add("defenders", missing);
+  return { defenders, midfielders, attackers };
+}
+
+function adjustTestLabFormation(current, changedKey, nextValue) {
+  const base = normalizeTestLabFormation(current);
+  const next = { ...base };
+  next[changedKey] = Math.max(0, Math.min(6, Math.floor(Number(nextValue ?? 0))));
+  const total = 6;
+  const keysToAdjust = ["attackers", "midfielders", "defenders"].filter((k) => k !== changedKey);
+  let sum = next.defenders + next.midfielders + next.attackers;
+  if (sum === total) return next;
+  if (sum > total) {
+    let excess = sum - total;
+    for (const k of keysToAdjust) {
+      const dec = Math.min(next[k], excess);
+      next[k] -= dec;
+      excess -= dec;
+      if (!excess) break;
+    }
+    return next;
+  }
+  let missing = total - sum;
+  for (const k of keysToAdjust) {
+    const inc = Math.min(6 - next[k], missing);
+    next[k] += inc;
+    missing -= inc;
+    if (!missing) break;
+  }
+  return next;
+}
+
 function normalizeTestLabState(input) {
   const base = createEmptyTestLabState();
   if (!input || typeof input !== "object") return base;
@@ -154,12 +222,8 @@ function normalizeTestLabState(input) {
         .map((l) => ({
           id: String(l?.id || makeId("lu")),
           teamId: String(l?.teamId || ""),
-          name: String(l?.name || "").trim() || "Oppstilling",
-          formation: {
-            defenders: Math.max(0, Math.min(6, Math.floor(Number(l?.formation?.defenders ?? 2)))),
-            midfielders: Math.max(0, Math.min(6, Math.floor(Number(l?.formation?.midfielders ?? 2)))),
-            attackers: Math.max(0, Math.min(6, Math.floor(Number(l?.formation?.attackers ?? 2)))),
-          },
+          name: String(l?.name || "").trim() || "Uppställning",
+          formation: normalizeTestLabFormation(l?.formation ?? { defenders: 2, midfielders: 2, attackers: 2 }),
           positions: l?.positions && typeof l.positions === "object" ? { ...l.positions } : {},
         }))
         .filter((l) => teamIds.has(l.teamId))
@@ -172,6 +236,7 @@ function TestLabPanel({ setErr, setOkMsg }) {
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [lastSavedAt, setLastSavedAt] = useState(null);
+  const [exportLineupIds, setExportLineupIds] = useState([]);
   const [teamNameDraft, setTeamNameDraft] = useState("");
   const [teamEditDraft, setTeamEditDraft] = useState("");
   const [editingTeamId, setEditingTeamId] = useState("");
@@ -196,7 +261,7 @@ function TestLabPanel({ setErr, setOkMsg }) {
         if (shared) {
           const merged = normalizeTestLabState(shared);
           setState(merged);
-          setOkMsg("Delad test-data importert.");
+          setOkMsg("Delad testdata importerad.");
           // Persist import immediately.
           setSaving(true);
           const saved = await api("/api/testlab/state", { method: "PUT", body: { testLab: merged } });
@@ -212,7 +277,7 @@ function TestLabPanel({ setErr, setOkMsg }) {
           setLastSavedAt(remote?.updatedAt || null);
         }
       } catch (e) {
-        setErr(e.message || "Kunne ikke laste test-data.");
+        setErr(e.message || "Kunde inte ladda testdata.");
       } finally {
         setSaving(false);
         setLoading(false);
@@ -229,7 +294,7 @@ function TestLabPanel({ setErr, setOkMsg }) {
         const saved = await api("/api/testlab/state", { method: "PUT", body: { testLab: normalizeTestLabState(state) } });
         setLastSavedAt(saved?.updatedAt || new Date().toISOString());
       } catch (e) {
-        setErr(e.message || "Kunne ikke lagre test-data.");
+        setErr(e.message || "Kunde inte spara testdata.");
       } finally {
         setSaving(false);
       }
@@ -264,6 +329,19 @@ function TestLabPanel({ setErr, setOkMsg }) {
     }
     if (activeLineupId !== activeLineup.id) setActiveLineupId(activeLineup.id);
   }, [activeLineup, activeLineupId]);
+
+  useEffect(() => {
+    if (!activeTeamId) {
+      setExportLineupIds([]);
+      return;
+    }
+    const ids = teamLineups.map((l) => l.id);
+    setExportLineupIds((prev) => {
+      const set = new Set(prev);
+      const keep = ids.filter((id) => set.has(id));
+      return keep.length ? keep : ids;
+    });
+  }, [activeTeamId, teamLineups]);
 
   const outfieldSlots = useMemo(() => buildOutfieldSlots(activeLineup?.formation || {}), [activeLineup?.formation]);
   const slotNodes = useMemo(
@@ -310,7 +388,7 @@ function TestLabPanel({ setErr, setOkMsg }) {
     }));
     setTeamNameDraft("");
     setActiveTeamId(id);
-    setOkMsg("Test-lag opprettet.");
+    setOkMsg("Testlag skapat.");
   };
 
   const startEditTeam = () => {
@@ -329,12 +407,12 @@ function TestLabPanel({ setErr, setOkMsg }) {
     }));
     setEditingTeamId("");
     setTeamEditDraft("");
-    setOkMsg("Test-lag oppdatert.");
+    setOkMsg("Testlag uppdaterat.");
   };
 
   const deleteTeam = () => {
     if (!activeTeam) return;
-    if (!confirm(`Slette test-laget "${activeTeam.name}"? Dette sletter også alle oppstillinger for laget.`)) return;
+    if (!confirm(`Ta bort testlaget "${activeTeam.name}"? Detta tar även bort alla uppställningar för laget.`)) return;
     const id = activeTeam.id;
     updateState((prev) => ({
       ...prev,
@@ -345,7 +423,7 @@ function TestLabPanel({ setErr, setOkMsg }) {
     setActiveLineupId("");
     setEditingTeamId("");
     setTeamEditDraft("");
-    setOkMsg("Test-lag slettet.");
+    setOkMsg("Testlag borttaget.");
   };
 
   const addPlayer = (e) => {
@@ -385,12 +463,12 @@ function TestLabPanel({ setErr, setOkMsg }) {
     setEditingPlayerId("");
     setPlayerEditNameDraft("");
     setPlayerEditNumberDraft("");
-    setOkMsg("Spiller oppdatert.");
+    setOkMsg("Spelare uppdaterad.");
   };
 
   const deletePlayer = (player) => {
     if (!activeTeam) return;
-    if (!confirm(`Slette ${player.name} fra test-laget?`)) return;
+    if (!confirm(`Ta bort ${player.name} från testlaget?`)) return;
     updateState((prev) => {
       const teams = prev.teams.map((t) =>
         t.id === activeTeam.id ? { ...t, players: t.players.filter((p) => p.id !== player.id) } : t,
@@ -408,13 +486,13 @@ function TestLabPanel({ setErr, setOkMsg }) {
       setPlayerEditNameDraft("");
       setPlayerEditNumberDraft("");
     }
-    setOkMsg("Spiller slettet.");
+    setOkMsg("Spelare borttagen.");
   };
 
   const addLineup = (e) => {
     e.preventDefault();
     if (!activeTeam) return;
-    const name = lineupNameDraft.trim() || `Oppstilling ${teamLineups.length + 1}`;
+    const name = lineupNameDraft.trim() || `Uppställning ${teamLineups.length + 1}`;
     const lineup = {
       id: makeId("lu"),
       teamId: activeTeam.id,
@@ -442,84 +520,109 @@ function TestLabPanel({ setErr, setOkMsg }) {
     updateLineup({ positions: next });
   };
 
+  const buildExportStateForActiveTeam = useCallback(() => {
+    const normalized = normalizeTestLabState(state);
+    if (!activeTeamId) return createEmptyTestLabState();
+    const team = normalized.teams.find((t) => t.id === activeTeamId);
+    if (!team) return createEmptyTestLabState();
+    const allowed = new Set(exportLineupIds.length ? exportLineupIds : normalized.lineups.filter((l) => l.teamId === activeTeamId).map((l) => l.id));
+    const lineups = normalized.lineups.filter((l) => l.teamId === activeTeamId && allowed.has(l.id));
+    return { teams: [team], lineups };
+  }, [state, activeTeamId, exportLineupIds]);
+
   const exportJson = () => {
-    const payload = normalizeTestLabState(state);
+    const payload = buildExportStateForActiveTeam();
     const blob = new Blob([JSON.stringify(payload, null, 2)], { type: "application/json" });
     const url = URL.createObjectURL(blob);
     const a = document.createElement("a");
     a.href = url;
-    a.download = `test-lagoppstillinger-${new Date().toISOString().slice(0, 10)}.json`;
+    a.download = `test-uppstallningar-${new Date().toISOString().slice(0, 10)}.json`;
     a.click();
     URL.revokeObjectURL(url);
-    setOkMsg("Test-oppsett eksportert som JSON.");
+    setOkMsg("Testdata exporterad som JSON.");
   };
 
   const lineupExportText = useMemo(() => {
-    if (!activeTeam || !activeLineup) return "";
-    const lines = [`Lag: ${activeTeam.name}`, `Oppstilling: ${activeLineup.name}`];
-    lines.push(`Formasjon: ${activeLineup.formation.defenders}-${activeLineup.formation.midfielders}-${activeLineup.formation.attackers}`);
-    lines.push("");
-    for (const node of slotNodes) {
-      const pid = slotToPlayerId[node.key];
-      const player = activeTeam.players.find((p) => p.id === pid);
-      const lane = node.lane ? ` ${node.lane}` : "";
-      lines.push(`${roleLabelSv(node.role)}${lane}: ${player ? `${player.name}${player.number ? ` (#${player.number})` : ""}` : "—"}`);
+    const exportState = buildExportStateForActiveTeam();
+    const team = exportState.teams[0];
+    if (!team) return "";
+    const playerById = new Map(team.players.map((p) => [p.id, p]));
+    const lines = [`Lag: ${team.name}`];
+    for (const lu of exportState.lineups) {
+      const outSlots = buildOutfieldSlots(lu.formation);
+      const nodes = [{ key: "gk", role: "goalkeeper", lane: "central" }, ...outSlots];
+      const slotToPlayer = {};
+      for (const p of team.players) {
+        const slotKey = String(lu.positions?.[p.id] || "bench");
+        if (!slotKey || slotKey === "bench") continue;
+        if (!slotToPlayer[slotKey]) slotToPlayer[slotKey] = p.id;
+      }
+      lines.push("");
+      lines.push(`Uppställning: ${lu.name}`);
+      lines.push(`Formation: ${lu.formation.defenders}-${lu.formation.midfielders}-${lu.formation.attackers}`);
+      lines.push("");
+      for (const node of nodes) {
+        const pid = slotToPlayer[node.key];
+        const player = pid ? playerById.get(pid) : null;
+        const lane = node.lane ? ` ${node.lane}` : "";
+        lines.push(`${roleLabelSv(node.role)}${lane}: ${player ? `${player.name}${player.number ? ` (#${player.number})` : ""}` : "—"}`);
+      }
+      const bench = team.players.filter((p) => !Object.values(slotToPlayer).includes(p.id));
+      lines.push("");
+      lines.push("Bänk:");
+      for (const p of bench) lines.push(`- ${p.name}${p.number ? ` (#${p.number})` : ""}`);
     }
-    const bench = activeTeam.players.filter((p) => !Object.values(slotToPlayerId).includes(p.id));
-    lines.push("");
-    lines.push("Benk:");
-    for (const p of bench) lines.push(`- ${p.name}${p.number ? ` (#${p.number})` : ""}`);
-    return lines.join("\n");
-  }, [activeTeam, activeLineup, slotNodes, slotToPlayerId]);
+    return lines.join("\n").trim();
+  }, [buildExportStateForActiveTeam]);
 
   const copyLineup = async () => {
     if (!lineupExportText) return;
     await navigator.clipboard.writeText(lineupExportText);
-    setOkMsg("Lagoppstilling kopiert.");
+    setOkMsg("Uppställningar kopierade.");
   };
 
   const copyShareLink = async () => {
-    const encoded = encodeTestLabShare(state);
-    if (!encoded) throw new Error("Kunne ikke lage delingslenke.");
+    const encoded = encodeTestLabShare(buildExportStateForActiveTeam());
+    if (!encoded) throw new Error("Kunde inte skapa delningslänk.");
     const url = new URL(window.location.href);
     url.searchParams.set("testlab", encoded);
     await navigator.clipboard.writeText(url.toString());
-    setOkMsg("Delingslenke kopiert.");
+    setOkMsg("Delningslänk kopierad.");
   };
 
   const shareLineup = async () => {
-    if (!navigator.share) throw new Error("Deling støttes ikke på denne enheten.");
+    if (!navigator.share) throw new Error("Delning stöds inte på den här enheten.");
     await navigator.share({
-      title: activeLineup?.name || "Test-lagoppstilling",
-      text: lineupExportText || "Se test-lagoppstilling.",
+      title: "Test – uppställningar",
+      text: lineupExportText || "Se uppställningar.",
     });
   };
 
   return (
     <section className="panel" role="tabpanel" id="panel-test" aria-labelledby="tab-test">
       <h2 className="panel__title">Test</h2>
-      <p className="panel__lead">Separat sandkasse for test-lag og lagoppstillinger. Dette påvirker ikke kampdata.</p>
+      <p className="panel__lead">Separat sandlåda för testlag och uppställningar. Detta påverkar inte matchdata.</p>
       <p className="text-muted" style={{ margin: "0 0 12px" }}>
-        Status: {loading ? "Laster…" : saving ? "Lagrer…" : lastSavedAt ? `Lagret ${new Date(lastSavedAt).toLocaleString()}` : "Klar"}
+        Status: {loading ? "Laddar…" : saving ? "Sparar…" : lastSavedAt ? `Sparad ${new Date(lastSavedAt).toLocaleString()}` : "Klar"}
       </p>
 
       <form className="form-add" onSubmit={addTeam}>
         <div className="field">
-          <span className="field__label">Nytt test-lag</span>
-          <input className="field__input" value={teamNameDraft} onChange={(e) => setTeamNameDraft(e.target.value)} placeholder="f.eks. Treningskamp blå" />
+          <span className="field__label">Nytt testlag</span>
+          <input className="field__input" value={teamNameDraft} onChange={(e) => setTeamNameDraft(e.target.value)} placeholder="t.ex. Träningsmatch blå" />
         </div>
-        <button type="submit" className="btn btn--primary">Opprett lag</button>
+        <button type="submit" className="btn btn--primary">Skapa lag</button>
       </form>
 
       {state.teams.length > 0 ? (
         <div className="field" style={{ marginTop: 12 }}>
-          <span className="field__label">Aktivt test-lag</span>
+          <span className="field__label">Aktivt testlag</span>
           <select className="field__select" value={activeTeamId} onChange={(e) => setActiveTeamId(e.target.value)}>
             {state.teams.map((t) => <option key={t.id} value={t.id}>{t.name}</option>)}
           </select>
         </div>
       ) : (
-        <p className="text-muted">Opprett et test-lag for å starte.</p>
+        <p className="text-muted">Skapa ett testlag för att börja.</p>
       )}
 
       {activeTeam ? (
@@ -528,11 +631,11 @@ function TestLabPanel({ setErr, setOkMsg }) {
             {editingTeamId === activeTeam.id ? (
               <>
                 <div className="field" style={{ width: "100%" }}>
-                  <span className="field__label">Rediger lagnavn</span>
+                  <span className="field__label">Redigera lagnamn</span>
                   <input className="field__input" value={teamEditDraft} onChange={(e) => setTeamEditDraft(e.target.value)} />
                 </div>
                 <button type="button" className="btn btn--secondary btn--block" onClick={saveEditTeam} disabled={!teamEditDraft.trim()}>
-                  Lagre lagnavn
+                  Spara lagnamn
                 </button>
                 <button type="button" className="btn btn--plain btn--block" onClick={() => { setEditingTeamId(""); setTeamEditDraft(""); }}>
                   Avbryt
@@ -541,10 +644,10 @@ function TestLabPanel({ setErr, setOkMsg }) {
             ) : (
               <>
                 <button type="button" className="btn btn--secondary btn--block" onClick={startEditTeam}>
-                  Rediger lag
+                  Redigera lag
                 </button>
                 <button type="button" className="btn btn--plain btn--block" onClick={deleteTeam}>
-                  Slett lag
+                  Ta bort lag
                 </button>
               </>
             )}
@@ -552,22 +655,22 @@ function TestLabPanel({ setErr, setOkMsg }) {
 
           <form className="form-add" onSubmit={addPlayer} style={{ marginTop: 16 }}>
             <div className="field">
-              <span className="field__label">Spillernavn</span>
-              <input className="field__input" value={playerNameDraft} onChange={(e) => setPlayerNameDraft(e.target.value)} placeholder="Navn" />
+              <span className="field__label">Spelarnamn</span>
+              <input className="field__input" value={playerNameDraft} onChange={(e) => setPlayerNameDraft(e.target.value)} placeholder="Namn" />
             </div>
             <div className="field">
-              <span className="field__label">Nummer (valgfritt)</span>
+              <span className="field__label">Nummer (valfritt)</span>
               <input className="field__input" type="number" min={1} value={playerNumberDraft} onChange={(e) => setPlayerNumberDraft(e.target.value)} />
             </div>
-            <button type="submit" className="btn btn--secondary">Legg til spiller</button>
+            <button type="submit" className="btn btn--secondary">Lägg till spelare</button>
           </form>
 
           {activeTeam.players.length > 0 ? (
             <>
               <p className="text-muted" style={{ margin: "10px 0 6px" }}>
-                Spillere i test-laget: <strong>{activeTeam.players.length}</strong>
+                Spelare i testlaget: <strong>{activeTeam.players.length}</strong>
               </p>
-              <ul className="lineup-list" aria-label="Test-lag spillere">
+              <ul className="lineup-list" aria-label="Testlag spelare">
                 {[...activeTeam.players]
                   .slice()
                   .sort((a, b) => String(a.name).localeCompare(String(b.name), "nb", { sensitivity: "base" }))
@@ -592,7 +695,7 @@ function TestLabPanel({ setErr, setOkMsg }) {
                               onChange={(e) => setPlayerEditNumberDraft(e.target.value)}
                             />
                             <button type="button" className="btn btn--secondary btn--sm" onClick={saveEditPlayer} disabled={!playerEditNameDraft.trim()}>
-                              Lagre
+                              Spara
                             </button>
                             <button
                               type="button"
@@ -613,10 +716,10 @@ function TestLabPanel({ setErr, setOkMsg }) {
                               {p.number != null ? `#${p.number}` : ""}
                             </span>
                             <button type="button" className="btn btn--plain btn--sm" onClick={() => startEditPlayer(p)}>
-                              Rediger
+                              Redigera
                             </button>
                             <button type="button" className="btn btn--plain btn--sm" onClick={() => deletePlayer(p)}>
-                              Slett
+                              Ta bort
                             </button>
                           </span>
                         )}
@@ -629,21 +732,21 @@ function TestLabPanel({ setErr, setOkMsg }) {
               </ul>
             </>
           ) : (
-            <p className="text-muted" style={{ marginTop: 10 }}>Ingen spillere lagt til enda.</p>
+            <p className="text-muted" style={{ marginTop: 10 }}>Inga spelare ännu.</p>
           )}
 
           <form className="form-add" onSubmit={addLineup} style={{ marginTop: 10 }}>
             <div className="field">
-              <span className="field__label">Ny lagoppstilling</span>
-              <input className="field__input" value={lineupNameDraft} onChange={(e) => setLineupNameDraft(e.target.value)} placeholder="f.eks. 2-3-1 høyt press" />
+              <span className="field__label">Ny laguppställning</span>
+              <input className="field__input" value={lineupNameDraft} onChange={(e) => setLineupNameDraft(e.target.value)} placeholder="t.ex. 2-3-1 högt press" />
             </div>
-            <button type="submit" className="btn btn--secondary">Opprett oppstilling</button>
+            <button type="submit" className="btn btn--secondary">Skapa uppställning</button>
           </form>
 
           {teamLineups.length > 0 ? (
             <>
               <div className="field" style={{ marginTop: 12 }}>
-                <span className="field__label">Aktiv oppstilling</span>
+                <span className="field__label">Aktiv uppställning</span>
                 <select className="field__select" value={activeLineup?.id || ""} onChange={(e) => setActiveLineupId(e.target.value)}>
                   {teamLineups.map((l) => <option key={l.id} value={l.id}>{l.name}</option>)}
                 </select>
@@ -661,7 +764,7 @@ function TestLabPanel({ setErr, setOkMsg }) {
                         value={activeLineup.formation.defenders}
                         onChange={(e) =>
                           updateLineup({
-                            formation: { ...activeLineup.formation, defenders: Math.max(0, Math.min(6, Number(e.target.value || 0))) },
+                            formation: adjustTestLabFormation(activeLineup.formation, "defenders", e.target.value),
                           })
                         }
                       />
@@ -673,7 +776,7 @@ function TestLabPanel({ setErr, setOkMsg }) {
                         value={activeLineup.formation.midfielders}
                         onChange={(e) =>
                           updateLineup({
-                            formation: { ...activeLineup.formation, midfielders: Math.max(0, Math.min(6, Number(e.target.value || 0))) },
+                            formation: adjustTestLabFormation(activeLineup.formation, "midfielders", e.target.value),
                           })
                         }
                       />
@@ -685,13 +788,13 @@ function TestLabPanel({ setErr, setOkMsg }) {
                         value={activeLineup.formation.attackers}
                         onChange={(e) =>
                           updateLineup({
-                            formation: { ...activeLineup.formation, attackers: Math.max(0, Math.min(6, Number(e.target.value || 0))) },
+                            formation: adjustTestLabFormation(activeLineup.formation, "attackers", e.target.value),
                           })
                         }
                       />
                     </div>
                     <p className="text-muted" style={{ marginTop: 8 }}>
-                      Formasjon: {activeLineup.formation.defenders}-{activeLineup.formation.midfielders}-{activeLineup.formation.attackers}
+                      Formation: {activeLineup.formation.defenders}-{activeLineup.formation.midfielders}-{activeLineup.formation.attackers} (6 utespelare)
                     </p>
 
                     <div className="lineup-player-grid">
@@ -703,7 +806,7 @@ function TestLabPanel({ setErr, setOkMsg }) {
                             value={activeLineup.positions?.[p.id] || "bench"}
                             onChange={(e) => updatePlayerPosition(p.id, e.target.value)}
                           >
-                            <option value="bench">Benk</option>
+                            <option value="bench">Bänk</option>
                             <option value="gk">Målvakt</option>
                             {outfieldSlots.map((slot) => (
                               <option key={`tlos-${slot.key}`} value={slot.key}>
@@ -715,7 +818,7 @@ function TestLabPanel({ setErr, setOkMsg }) {
                       ))}
                     </div>
                     {duplicateSlots.length > 0 ? (
-                      <p className="text-muted">Du har flere spillere på samme posisjon: {duplicateSlots.join(", ")}.</p>
+                      <p className="text-muted">Flera spelare har samma position: {duplicateSlots.join(", ")}.</p>
                     ) : null}
                   </div>
 
@@ -753,21 +856,56 @@ function TestLabPanel({ setErr, setOkMsg }) {
               ) : null}
             </>
           ) : (
-            <p className="text-muted" style={{ marginTop: 10 }}>Opprett en lagoppstilling for å starte visualisering.</p>
+            <p className="text-muted" style={{ marginTop: 10 }}>Skapa en uppställning för att börja visualisera.</p>
           )}
         </>
       ) : null}
 
       <div className="match-card__actions" style={{ marginTop: 16 }}>
-        <button type="button" className="btn btn--secondary btn--block" onClick={exportJson}>Eksporter testdata (JSON)</button>
-        <button type="button" className="btn btn--secondary btn--block" onClick={() => copyLineup().catch((e) => setErr(e.message))} disabled={!activeLineup}>
-          Kopier lagoppstilling
+        {activeTeam && teamLineups.length > 0 ? (
+          <div className="group" style={{ padding: 12, width: "100%" }}>
+            <p className="panel__lead" style={{ margin: "0 0 6px" }}>Export och delning</p>
+            <p className="text-muted" style={{ margin: 0, fontSize: 14 }}>
+              Välj vilka uppställningar som ska vara med.
+            </p>
+            <div style={{ display: "grid", gap: 8, marginTop: 10 }}>
+              {teamLineups.map((l) => (
+                <label key={`exp-${l.id}`} style={{ display: "flex", gap: 10, alignItems: "center" }}>
+                  <input
+                    type="checkbox"
+                    checked={exportLineupIds.includes(l.id)}
+                    onChange={(e) => {
+                      const on = e.target.checked;
+                      setExportLineupIds((prev) => {
+                        const set = new Set(prev);
+                        if (on) set.add(l.id);
+                        else set.delete(l.id);
+                        const next = [...set];
+                        return next.length ? next : [l.id];
+                      });
+                    }}
+                  />
+                  <span style={{ fontWeight: 600 }}>{l.name}</span>
+                  <span className="text-muted" style={{ fontSize: 13 }}>
+                    {l.formation.defenders}-{l.formation.midfielders}-{l.formation.attackers}
+                  </span>
+                </label>
+              ))}
+            </div>
+          </div>
+        ) : null}
+
+        <button type="button" className="btn btn--secondary btn--block" onClick={exportJson} disabled={!activeTeam}>
+          Exportera testdata (JSON)
+        </button>
+        <button type="button" className="btn btn--secondary btn--block" onClick={() => copyLineup().catch((e) => setErr(e.message))} disabled={!activeTeam || !teamLineups.length}>
+          Kopiera uppställningar
         </button>
         <button type="button" className="btn btn--secondary btn--block" onClick={() => copyShareLink().catch((e) => setErr(e.message))}>
-          Kopier delingslenke
+          Kopiera delningslänk
         </button>
-        <button type="button" className="btn btn--secondary btn--block" onClick={() => shareLineup().catch((e) => setErr(e.message))} disabled={!activeLineup}>
-          Del lagoppstilling
+        <button type="button" className="btn btn--secondary btn--block" onClick={() => shareLineup().catch((e) => setErr(e.message))} disabled={!activeTeam || !teamLineups.length}>
+          Dela uppställningar
         </button>
       </div>
     </section>
