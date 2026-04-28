@@ -448,6 +448,27 @@ function TestLabPanel({ setErr, setOkMsg }) {
             <button type="submit" className="btn btn--secondary">Legg til spiller</button>
           </form>
 
+          {activeTeam.players.length > 0 ? (
+            <>
+              <p className="text-muted" style={{ margin: "10px 0 6px" }}>
+                Spillere i test-laget: <strong>{activeTeam.players.length}</strong>
+              </p>
+              <ul className="lineup-list" aria-label="Test-lag spillere">
+                {[...activeTeam.players]
+                  .slice()
+                  .sort((a, b) => String(a.name).localeCompare(String(b.name), "nb", { sensitivity: "base" }))
+                  .map((p) => (
+                    <li key={`test-player-${p.id}`} className="lineup-list__row">
+                      <span className="lineup-list__name">{p.name}</span>
+                      <span className="lineup-list__year">{p.number ?? "—"}</span>
+                    </li>
+                  ))}
+              </ul>
+            </>
+          ) : (
+            <p className="text-muted" style={{ marginTop: 10 }}>Ingen spillere lagt til enda.</p>
+          )}
+
           <form className="form-add" onSubmit={addLineup} style={{ marginTop: 10 }}>
             <div className="field">
               <span className="field__label">Ny lagoppstilling</span>
