@@ -173,8 +173,13 @@ function TestLabPanel({ setErr, setOkMsg }) {
   const [saving, setSaving] = useState(false);
   const [lastSavedAt, setLastSavedAt] = useState(null);
   const [teamNameDraft, setTeamNameDraft] = useState("");
+  const [teamEditDraft, setTeamEditDraft] = useState("");
+  const [editingTeamId, setEditingTeamId] = useState("");
   const [playerNameDraft, setPlayerNameDraft] = useState("");
   const [playerNumberDraft, setPlayerNumberDraft] = useState("");
+  const [editingPlayerId, setEditingPlayerId] = useState("");
+  const [playerEditNameDraft, setPlayerEditNameDraft] = useState("");
+  const [playerEditNumberDraft, setPlayerEditNumberDraft] = useState("");
   const [lineupNameDraft, setLineupNameDraft] = useState("");
   const [activeTeamId, setActiveTeamId] = useState("");
   const [activeLineupId, setActiveLineupId] = useState("");
@@ -308,6 +313,41 @@ function TestLabPanel({ setErr, setOkMsg }) {
     setOkMsg("Test-lag opprettet.");
   };
 
+  const startEditTeam = () => {
+    if (!activeTeam) return;
+    setEditingTeamId(activeTeam.id);
+    setTeamEditDraft(activeTeam.name);
+  };
+
+  const saveEditTeam = () => {
+    if (!editingTeamId) return;
+    const name = teamEditDraft.trim();
+    if (!name) return;
+    updateState((prev) => ({
+      ...prev,
+      teams: prev.teams.map((t) => (t.id === editingTeamId ? { ...t, name } : t)),
+    }));
+    setEditingTeamId("");
+    setTeamEditDraft("");
+    setOkMsg("Test-lag oppdatert.");
+  };
+
+  const deleteTeam = () => {
+    if (!activeTeam) return;
+    if (!confirm(`Slette test-laget "${activeTeam.name}"? Dette sletter også alle oppstillinger for laget.`)) return;
+    const id = activeTeam.id;
+    updateState((prev) => ({
+      ...prev,
+      teams: prev.teams.filter((t) => t.id !== id),
+      lineups: prev.lineups.filter((l) => l.teamId !== id),
+    }));
+    setActiveTeamId("");
+    setActiveLineupId("");
+    setEditingTeamId("");
+    setTeamEditDraft("");
+    setOkMsg("Test-lag slettet.");
+  };
+
   const addPlayer = (e) => {
     e.preventDefault();
     if (!activeTeam) return;
@@ -321,6 +361,54 @@ function TestLabPanel({ setErr, setOkMsg }) {
     }));
     setPlayerNameDraft("");
     setPlayerNumberDraft("");
+  };
+
+  const startEditPlayer = (p) => {
+    setEditingPlayerId(p.id);
+    setPlayerEditNameDraft(p.name);
+    setPlayerEditNumberDraft(p.number != null ? String(p.number) : "");
+  };
+
+  const saveEditPlayer = () => {
+    if (!activeTeam || !editingPlayerId) return;
+    const name = playerEditNameDraft.trim();
+    if (!name) return;
+    const number = Number.isFinite(Number(playerEditNumberDraft)) ? Math.max(1, Math.floor(Number(playerEditNumberDraft))) : null;
+    updateState((prev) => ({
+      ...prev,
+      teams: prev.teams.map((t) =>
+        t.id === activeTeam.id
+          ? { ...t, players: t.players.map((p) => (p.id === editingPlayerId ? { ...p, name, number } : p)) }
+          : t,
+      ),
+    }));
+    setEditingPlayerId("");
+    setPlayerEditNameDraft("");
+    setPlayerEditNumberDraft("");
+    setOkMsg("Spiller oppdatert.");
+  };
+
+  const deletePlayer = (player) => {
+    if (!activeTeam) return;
+    if (!confirm(`Slette ${player.name} fra test-laget?`)) return;
+    updateState((prev) => {
+      const teams = prev.teams.map((t) =>
+        t.id === activeTeam.id ? { ...t, players: t.players.filter((p) => p.id !== player.id) } : t,
+      );
+      const lineups = prev.lineups.map((l) => {
+        if (l.teamId !== activeTeam.id) return l;
+        const positions = { ...(l.positions || {}) };
+        delete positions[player.id];
+        return { ...l, positions };
+      });
+      return { ...prev, teams, lineups };
+    });
+    if (editingPlayerId === player.id) {
+      setEditingPlayerId("");
+      setPlayerEditNameDraft("");
+      setPlayerEditNumberDraft("");
+    }
+    setOkMsg("Spiller slettet.");
   };
 
   const addLineup = (e) => {
@@ -436,6 +524,32 @@ function TestLabPanel({ setErr, setOkMsg }) {
 
       {activeTeam ? (
         <>
+          <div className="match-card__actions" style={{ marginTop: 10 }}>
+            {editingTeamId === activeTeam.id ? (
+              <>
+                <div className="field" style={{ width: "100%" }}>
+                  <span className="field__label">Rediger lagnavn</span>
+                  <input className="field__input" value={teamEditDraft} onChange={(e) => setTeamEditDraft(e.target.value)} />
+                </div>
+                <button type="button" className="btn btn--secondary btn--block" onClick={saveEditTeam} disabled={!teamEditDraft.trim()}>
+                  Lagre lagnavn
+                </button>
+                <button type="button" className="btn btn--plain btn--block" onClick={() => { setEditingTeamId(""); setTeamEditDraft(""); }}>
+                  Avbryt
+                </button>
+              </>
+            ) : (
+              <>
+                <button type="button" className="btn btn--secondary btn--block" onClick={startEditTeam}>
+                  Rediger lag
+                </button>
+                <button type="button" className="btn btn--plain btn--block" onClick={deleteTeam}>
+                  Slett lag
+                </button>
+              </>
+            )}
+          </div>
+
           <form className="form-add" onSubmit={addPlayer} style={{ marginTop: 16 }}>
             <div className="field">
               <span className="field__label">Spillernavn</span>
@@ -459,8 +573,57 @@ function TestLabPanel({ setErr, setOkMsg }) {
                   .sort((a, b) => String(a.name).localeCompare(String(b.name), "nb", { sensitivity: "base" }))
                   .map((p) => (
                     <li key={`test-player-${p.id}`} className="lineup-list__row">
-                      <span className="lineup-list__name">{p.name}</span>
-                      <span className="lineup-list__year">{p.number ?? "—"}</span>
+                      <span className="lineup-list__name">
+                        {editingPlayerId === p.id ? (
+                          <span style={{ display: "flex", flexWrap: "wrap", gap: 8, alignItems: "center" }}>
+                            <input
+                              className="field__input"
+                              style={{ width: 220, padding: "8px 10px" }}
+                              value={playerEditNameDraft}
+                              onChange={(e) => setPlayerEditNameDraft(e.target.value)}
+                            />
+                            <input
+                              className="field__input"
+                              style={{ width: 120, padding: "8px 10px" }}
+                              type="number"
+                              min={1}
+                              placeholder="Nr"
+                              value={playerEditNumberDraft}
+                              onChange={(e) => setPlayerEditNumberDraft(e.target.value)}
+                            />
+                            <button type="button" className="btn btn--secondary btn--sm" onClick={saveEditPlayer} disabled={!playerEditNameDraft.trim()}>
+                              Lagre
+                            </button>
+                            <button
+                              type="button"
+                              className="btn btn--plain btn--sm"
+                              onClick={() => {
+                                setEditingPlayerId("");
+                                setPlayerEditNameDraft("");
+                                setPlayerEditNumberDraft("");
+                              }}
+                            >
+                              Avbryt
+                            </button>
+                          </span>
+                        ) : (
+                          <span style={{ display: "flex", flexWrap: "wrap", gap: 10, alignItems: "center" }}>
+                            <span>{p.name}</span>
+                            <span style={{ color: "var(--text-tertiary)", fontWeight: 600, fontVariantNumeric: "tabular-nums" }}>
+                              {p.number != null ? `#${p.number}` : ""}
+                            </span>
+                            <button type="button" className="btn btn--plain btn--sm" onClick={() => startEditPlayer(p)}>
+                              Rediger
+                            </button>
+                            <button type="button" className="btn btn--plain btn--sm" onClick={() => deletePlayer(p)}>
+                              Slett
+                            </button>
+                          </span>
+                        )}
+                      </span>
+                      <span className="lineup-list__year" aria-hidden>
+                        {p.number ?? "—"}
+                      </span>
                     </li>
                   ))}
               </ul>
