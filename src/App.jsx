@@ -46,6 +46,7 @@ const TABS = [
   { id: "players", label: "Spelargrupp" },
   { id: "matches", label: "Matcher" },
   { id: "overview", label: "Statistik" },
+  { id: "test", label: "Test" },
   { id: "settings", label: "Inställningar" },
 ];
 
@@ -97,6 +98,496 @@ function slotLabelFromKey(slotKey, outfieldSlots) {
   if (!slot) return "Bänk";
   const lane = slot.lane === "vänster" ? "vänster" : slot.lane === "höger" ? "höger" : "central";
   return `${roleLabelSv(slot.role)} (${lane})`;
+}
+
+function makeId(prefix) {
+  return `${prefix}-${Math.random().toString(36).slice(2, 10)}`;
+}
+
+function encodeTestLabShare(state) {
+  try {
+    const json = JSON.stringify(state || {});
+    return btoa(unescape(encodeURIComponent(json)));
+  } catch {
+    return "";
+  }
+}
+
+function decodeTestLabShare(value) {
+  try {
+    if (!value) return null;
+    const json = decodeURIComponent(escape(atob(value)));
+    return JSON.parse(json);
+  } catch {
+    return null;
+  }
+}
+
+function createEmptyTestLabState() {
+  return {
+    teams: [],
+    lineups: [],
+  };
+}
+
+function normalizeTestLabState(input) {
+  const base = createEmptyTestLabState();
+  if (!input || typeof input !== "object") return base;
+  const teams = Array.isArray(input.teams)
+    ? input.teams.map((t) => ({
+        id: String(t?.id || makeId("t")),
+        name: String(t?.name || "").trim() || "Uten navn",
+        players: Array.isArray(t?.players)
+          ? t.players
+              .map((p) => ({
+                id: String(p?.id || makeId("tp")),
+                name: String(p?.name || "").trim(),
+                number: Number.isFinite(Number(p?.number)) ? Math.max(1, Math.floor(Number(p.number))) : null,
+              }))
+              .filter((p) => p.name)
+          : [],
+      }))
+    : [];
+  const teamIds = new Set(teams.map((t) => t.id));
+  const lineups = Array.isArray(input.lineups)
+    ? input.lineups
+        .map((l) => ({
+          id: String(l?.id || makeId("lu")),
+          teamId: String(l?.teamId || ""),
+          name: String(l?.name || "").trim() || "Oppstilling",
+          formation: {
+            defenders: Math.max(0, Math.min(6, Math.floor(Number(l?.formation?.defenders ?? 2)))),
+            midfielders: Math.max(0, Math.min(6, Math.floor(Number(l?.formation?.midfielders ?? 2)))),
+            attackers: Math.max(0, Math.min(6, Math.floor(Number(l?.formation?.attackers ?? 2)))),
+          },
+          positions: l?.positions && typeof l.positions === "object" ? { ...l.positions } : {},
+        }))
+        .filter((l) => teamIds.has(l.teamId))
+    : [];
+  return { teams, lineups };
+}
+
+function TestLabPanel({ setErr, setOkMsg }) {
+  const [state, setState] = useState(() => createEmptyTestLabState());
+  const [loading, setLoading] = useState(true);
+  const [saving, setSaving] = useState(false);
+  const [lastSavedAt, setLastSavedAt] = useState(null);
+  const [teamNameDraft, setTeamNameDraft] = useState("");
+  const [playerNameDraft, setPlayerNameDraft] = useState("");
+  const [playerNumberDraft, setPlayerNumberDraft] = useState("");
+  const [lineupNameDraft, setLineupNameDraft] = useState("");
+  const [activeTeamId, setActiveTeamId] = useState("");
+  const [activeLineupId, setActiveLineupId] = useState("");
+
+  useEffect(() => {
+    const sharedParam = new URLSearchParams(window.location.search).get("testlab");
+    const shared = decodeTestLabShare(sharedParam);
+    const run = async () => {
+      setErr("");
+      setLoading(true);
+      try {
+        const remote = await api("/api/testlab/state");
+        const base = normalizeTestLabState(remote?.testLab);
+        if (shared) {
+          const merged = normalizeTestLabState(shared);
+          setState(merged);
+          setOkMsg("Delad test-data importert.");
+          // Persist import immediately.
+          setSaving(true);
+          const saved = await api("/api/testlab/state", { method: "PUT", body: { testLab: merged } });
+          setLastSavedAt(saved?.updatedAt || new Date().toISOString());
+          // Strip query param after successful import.
+          if (sharedParam) {
+            const url = new URL(window.location.href);
+            url.searchParams.delete("testlab");
+            window.history.replaceState({}, "", url.toString());
+          }
+        } else {
+          setState(base);
+          setLastSavedAt(remote?.updatedAt || null);
+        }
+      } catch (e) {
+        setErr(e.message || "Kunne ikke laste test-data.");
+      } finally {
+        setSaving(false);
+        setLoading(false);
+      }
+    };
+    run().catch(() => null);
+  }, [setErr, setOkMsg]);
+
+  useEffect(() => {
+    if (loading) return;
+    const t = setTimeout(async () => {
+      try {
+        setSaving(true);
+        const saved = await api("/api/testlab/state", { method: "PUT", body: { testLab: normalizeTestLabState(state) } });
+        setLastSavedAt(saved?.updatedAt || new Date().toISOString());
+      } catch (e) {
+        setErr(e.message || "Kunne ikke lagre test-data.");
+      } finally {
+        setSaving(false);
+      }
+    }, 650);
+    return () => clearTimeout(t);
+  }, [state, loading, setErr]);
+
+  useEffect(() => {
+    if (!activeTeamId || state.teams.some((t) => t.id === activeTeamId)) return;
+    setActiveTeamId(state.teams[0]?.id || "");
+  }, [state.teams, activeTeamId]);
+
+  useEffect(() => {
+    if (activeTeamId) return;
+    if (state.teams[0]?.id) setActiveTeamId(state.teams[0].id);
+  }, [state.teams, activeTeamId]);
+
+  const activeTeam = useMemo(() => state.teams.find((t) => t.id === activeTeamId) || null, [state.teams, activeTeamId]);
+  const teamLineups = useMemo(
+    () => state.lineups.filter((l) => l.teamId === activeTeamId),
+    [state.lineups, activeTeamId],
+  );
+  const activeLineup = useMemo(
+    () => state.lineups.find((l) => l.id === activeLineupId && l.teamId === activeTeamId) || teamLineups[0] || null,
+    [state.lineups, activeLineupId, activeTeamId, teamLineups],
+  );
+
+  useEffect(() => {
+    if (!activeLineup) {
+      setActiveLineupId("");
+      return;
+    }
+    if (activeLineupId !== activeLineup.id) setActiveLineupId(activeLineup.id);
+  }, [activeLineup, activeLineupId]);
+
+  const outfieldSlots = useMemo(() => buildOutfieldSlots(activeLineup?.formation || {}), [activeLineup?.formation]);
+  const slotNodes = useMemo(
+    () => [{ key: "gk", role: "goalkeeper", lane: "central", y: 86 }, ...outfieldSlots.map((slot) => ({
+      ...slot,
+      y: slot.role === "defender" ? 67 : slot.role === "midfielder" ? 49 : 31,
+    }))],
+    [outfieldSlots],
+  );
+  const slotToPlayerId = useMemo(() => {
+    const map = {};
+    if (!activeLineup || !activeTeam) return map;
+    const validPlayerIds = new Set(activeTeam.players.map((p) => p.id));
+    for (const p of activeTeam.players) {
+      const slotKey = String(activeLineup.positions?.[p.id] || "bench");
+      if (!validPlayerIds.has(p.id) || !slotKey || slotKey === "bench") continue;
+      if (!map[slotKey]) map[slotKey] = p.id;
+    }
+    return map;
+  }, [activeLineup, activeTeam]);
+  const duplicateSlots = useMemo(() => {
+    if (!activeLineup || !activeTeam) return [];
+    const counts = new Map();
+    for (const p of activeTeam.players) {
+      const slotKey = String(activeLineup.positions?.[p.id] || "bench");
+      if (!slotKey || slotKey === "bench") continue;
+      counts.set(slotKey, (counts.get(slotKey) || 0) + 1);
+    }
+    return [...counts.entries()].filter(([, n]) => n > 1).map(([k]) => k);
+  }, [activeLineup, activeTeam]);
+
+  const updateState = useCallback((updater) => {
+    setState((prev) => normalizeTestLabState(typeof updater === "function" ? updater(prev) : updater));
+  }, []);
+
+  const addTeam = (e) => {
+    e.preventDefault();
+    const name = teamNameDraft.trim();
+    if (!name) return;
+    const id = makeId("t");
+    updateState((prev) => ({
+      ...prev,
+      teams: [...prev.teams, { id, name, players: [] }],
+    }));
+    setTeamNameDraft("");
+    setActiveTeamId(id);
+    setOkMsg("Test-lag opprettet.");
+  };
+
+  const addPlayer = (e) => {
+    e.preventDefault();
+    if (!activeTeam) return;
+    const name = playerNameDraft.trim();
+    if (!name) return;
+    const number = Number.isFinite(Number(playerNumberDraft)) ? Math.max(1, Math.floor(Number(playerNumberDraft))) : null;
+    const player = { id: makeId("tp"), name, number };
+    updateState((prev) => ({
+      ...prev,
+      teams: prev.teams.map((t) => (t.id === activeTeam.id ? { ...t, players: [...t.players, player] } : t)),
+    }));
+    setPlayerNameDraft("");
+    setPlayerNumberDraft("");
+  };
+
+  const addLineup = (e) => {
+    e.preventDefault();
+    if (!activeTeam) return;
+    const name = lineupNameDraft.trim() || `Oppstilling ${teamLineups.length + 1}`;
+    const lineup = {
+      id: makeId("lu"),
+      teamId: activeTeam.id,
+      name,
+      formation: { defenders: 2, midfielders: 2, attackers: 2 },
+      positions: {},
+    };
+    updateState((prev) => ({ ...prev, lineups: [...prev.lineups, lineup] }));
+    setLineupNameDraft("");
+    setActiveLineupId(lineup.id);
+  };
+
+  const updateLineup = (patch) => {
+    if (!activeLineup) return;
+    updateState((prev) => ({
+      ...prev,
+      lineups: prev.lineups.map((l) => (l.id === activeLineup.id ? { ...l, ...patch } : l)),
+    }));
+  };
+
+  const updatePlayerPosition = (playerId, slotKey) => {
+    if (!activeLineup) return;
+    const next = { ...(activeLineup.positions || {}) };
+    next[playerId] = slotKey;
+    updateLineup({ positions: next });
+  };
+
+  const exportJson = () => {
+    const payload = normalizeTestLabState(state);
+    const blob = new Blob([JSON.stringify(payload, null, 2)], { type: "application/json" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = `test-lagoppstillinger-${new Date().toISOString().slice(0, 10)}.json`;
+    a.click();
+    URL.revokeObjectURL(url);
+    setOkMsg("Test-oppsett eksportert som JSON.");
+  };
+
+  const lineupExportText = useMemo(() => {
+    if (!activeTeam || !activeLineup) return "";
+    const lines = [`Lag: ${activeTeam.name}`, `Oppstilling: ${activeLineup.name}`];
+    lines.push(`Formasjon: ${activeLineup.formation.defenders}-${activeLineup.formation.midfielders}-${activeLineup.formation.attackers}`);
+    lines.push("");
+    for (const node of slotNodes) {
+      const pid = slotToPlayerId[node.key];
+      const player = activeTeam.players.find((p) => p.id === pid);
+      const lane = node.lane ? ` ${node.lane}` : "";
+      lines.push(`${roleLabelSv(node.role)}${lane}: ${player ? `${player.name}${player.number ? ` (#${player.number})` : ""}` : "—"}`);
+    }
+    const bench = activeTeam.players.filter((p) => !Object.values(slotToPlayerId).includes(p.id));
+    lines.push("");
+    lines.push("Benk:");
+    for (const p of bench) lines.push(`- ${p.name}${p.number ? ` (#${p.number})` : ""}`);
+    return lines.join("\n");
+  }, [activeTeam, activeLineup, slotNodes, slotToPlayerId]);
+
+  const copyLineup = async () => {
+    if (!lineupExportText) return;
+    await navigator.clipboard.writeText(lineupExportText);
+    setOkMsg("Lagoppstilling kopiert.");
+  };
+
+  const copyShareLink = async () => {
+    const encoded = encodeTestLabShare(state);
+    if (!encoded) throw new Error("Kunne ikke lage delingslenke.");
+    const url = new URL(window.location.href);
+    url.searchParams.set("testlab", encoded);
+    await navigator.clipboard.writeText(url.toString());
+    setOkMsg("Delingslenke kopiert.");
+  };
+
+  const shareLineup = async () => {
+    if (!navigator.share) throw new Error("Deling støttes ikke på denne enheten.");
+    await navigator.share({
+      title: activeLineup?.name || "Test-lagoppstilling",
+      text: lineupExportText || "Se test-lagoppstilling.",
+    });
+  };
+
+  return (
+    <section className="panel" role="tabpanel" id="panel-test" aria-labelledby="tab-test">
+      <h2 className="panel__title">Test</h2>
+      <p className="panel__lead">Separat sandkasse for test-lag og lagoppstillinger. Dette påvirker ikke kampdata.</p>
+      <p className="text-muted" style={{ margin: "0 0 12px" }}>
+        Status: {loading ? "Laster…" : saving ? "Lagrer…" : lastSavedAt ? `Lagret ${new Date(lastSavedAt).toLocaleString()}` : "Klar"}
+      </p>
+
+      <form className="form-add" onSubmit={addTeam}>
+        <div className="field">
+          <span className="field__label">Nytt test-lag</span>
+          <input className="field__input" value={teamNameDraft} onChange={(e) => setTeamNameDraft(e.target.value)} placeholder="f.eks. Treningskamp blå" />
+        </div>
+        <button type="submit" className="btn btn--primary">Opprett lag</button>
+      </form>
+
+      {state.teams.length > 0 ? (
+        <div className="field" style={{ marginTop: 12 }}>
+          <span className="field__label">Aktivt test-lag</span>
+          <select className="field__select" value={activeTeamId} onChange={(e) => setActiveTeamId(e.target.value)}>
+            {state.teams.map((t) => <option key={t.id} value={t.id}>{t.name}</option>)}
+          </select>
+        </div>
+      ) : (
+        <p className="text-muted">Opprett et test-lag for å starte.</p>
+      )}
+
+      {activeTeam ? (
+        <>
+          <form className="form-add" onSubmit={addPlayer} style={{ marginTop: 16 }}>
+            <div className="field">
+              <span className="field__label">Spillernavn</span>
+              <input className="field__input" value={playerNameDraft} onChange={(e) => setPlayerNameDraft(e.target.value)} placeholder="Navn" />
+            </div>
+            <div className="field">
+              <span className="field__label">Nummer (valgfritt)</span>
+              <input className="field__input" type="number" min={1} value={playerNumberDraft} onChange={(e) => setPlayerNumberDraft(e.target.value)} />
+            </div>
+            <button type="submit" className="btn btn--secondary">Legg til spiller</button>
+          </form>
+
+          <form className="form-add" onSubmit={addLineup} style={{ marginTop: 10 }}>
+            <div className="field">
+              <span className="field__label">Ny lagoppstilling</span>
+              <input className="field__input" value={lineupNameDraft} onChange={(e) => setLineupNameDraft(e.target.value)} placeholder="f.eks. 2-3-1 høyt press" />
+            </div>
+            <button type="submit" className="btn btn--secondary">Opprett oppstilling</button>
+          </form>
+
+          {teamLineups.length > 0 ? (
+            <>
+              <div className="field" style={{ marginTop: 12 }}>
+                <span className="field__label">Aktiv oppstilling</span>
+                <select className="field__select" value={activeLineup?.id || ""} onChange={(e) => setActiveLineupId(e.target.value)}>
+                  {teamLineups.map((l) => <option key={l.id} value={l.id}>{l.name}</option>)}
+                </select>
+              </div>
+
+              {activeLineup ? (
+                <div className="lineup-layout" style={{ marginTop: 12 }}>
+                  <div className="lineup-layout__controls">
+                    <div className="lineup-formation-grid">
+                      <input
+                        className="field__select"
+                        type="number"
+                        min={0}
+                        max={6}
+                        value={activeLineup.formation.defenders}
+                        onChange={(e) =>
+                          updateLineup({
+                            formation: { ...activeLineup.formation, defenders: Math.max(0, Math.min(6, Number(e.target.value || 0))) },
+                          })
+                        }
+                      />
+                      <input
+                        className="field__select"
+                        type="number"
+                        min={0}
+                        max={6}
+                        value={activeLineup.formation.midfielders}
+                        onChange={(e) =>
+                          updateLineup({
+                            formation: { ...activeLineup.formation, midfielders: Math.max(0, Math.min(6, Number(e.target.value || 0))) },
+                          })
+                        }
+                      />
+                      <input
+                        className="field__select"
+                        type="number"
+                        min={0}
+                        max={6}
+                        value={activeLineup.formation.attackers}
+                        onChange={(e) =>
+                          updateLineup({
+                            formation: { ...activeLineup.formation, attackers: Math.max(0, Math.min(6, Number(e.target.value || 0))) },
+                          })
+                        }
+                      />
+                    </div>
+                    <p className="text-muted" style={{ marginTop: 8 }}>
+                      Formasjon: {activeLineup.formation.defenders}-{activeLineup.formation.midfielders}-{activeLineup.formation.attackers}
+                    </p>
+
+                    <div className="lineup-player-grid">
+                      {activeTeam.players.map((p) => (
+                        <div key={`tlp-${p.id}`} className="field">
+                          <span className="field__label">{p.name}{p.number ? ` #${p.number}` : ""}</span>
+                          <select
+                            className="field__select"
+                            value={activeLineup.positions?.[p.id] || "bench"}
+                            onChange={(e) => updatePlayerPosition(p.id, e.target.value)}
+                          >
+                            <option value="bench">Benk</option>
+                            <option value="gk">Målvakt</option>
+                            {outfieldSlots.map((slot) => (
+                              <option key={`tlos-${slot.key}`} value={slot.key}>
+                                {slotLabelFromKey(slot.key, outfieldSlots)}
+                              </option>
+                            ))}
+                          </select>
+                        </div>
+                      ))}
+                    </div>
+                    {duplicateSlots.length > 0 ? (
+                      <p className="text-muted">Du har flere spillere på samme posisjon: {duplicateSlots.join(", ")}.</p>
+                    ) : null}
+                  </div>
+
+                  <div className="lineup-layout__pitch">
+                    <div className="lineup-pitch" aria-label="Testlag på fotbollsplan">
+                      <div className="lineup-pitch__surface">
+                        <div className="lineup-pitch__half" />
+                        <div className="lineup-pitch__circle" />
+                        <div className="lineup-pitch__box lineup-pitch__box--top" />
+                        <div className="lineup-pitch__box lineup-pitch__box--bottom" />
+                        {slotNodes.map((slotNode) => {
+                          const playerId = slotToPlayerId[slotNode.key];
+                          const player = activeTeam.players.find((p) => p.id === playerId);
+                          return (
+                            <div
+                              key={`tlslot-${slotNode.key}`}
+                              className={`lineup-pitch__slot lineup-pitch__slot--${slotNode.role} ${player ? "is-filled" : ""}`}
+                              style={{ left: `${slotNode.lane === "vänster" ? 23 : slotNode.lane === "höger" ? 77 : 50}%`, top: `${slotNode.y}%` }}
+                            >
+                              {player ? (
+                                <div className={`lineup-pitch__player lineup-pitch__player--${slotNode.role}`}>
+                                  <span className="lineup-pitch__number">{player.number || "?"}</span>
+                                  <span className="lineup-pitch__name">{player.name}</span>
+                                </div>
+                              ) : (
+                                <span className="lineup-pitch__empty">{roleLabelSv(slotNode.role)}</span>
+                              )}
+                            </div>
+                          );
+                        })}
+                      </div>
+                    </div>
+                  </div>
+                </div>
+              ) : null}
+            </>
+          ) : (
+            <p className="text-muted" style={{ marginTop: 10 }}>Opprett en lagoppstilling for å starte visualisering.</p>
+          )}
+        </>
+      ) : null}
+
+      <div className="match-card__actions" style={{ marginTop: 16 }}>
+        <button type="button" className="btn btn--secondary btn--block" onClick={exportJson}>Eksporter testdata (JSON)</button>
+        <button type="button" className="btn btn--secondary btn--block" onClick={() => copyLineup().catch((e) => setErr(e.message))} disabled={!activeLineup}>
+          Kopier lagoppstilling
+        </button>
+        <button type="button" className="btn btn--secondary btn--block" onClick={() => copyShareLink().catch((e) => setErr(e.message))}>
+          Kopier delingslenke
+        </button>
+        <button type="button" className="btn btn--secondary btn--block" onClick={() => shareLineup().catch((e) => setErr(e.message))} disabled={!activeLineup}>
+          Del lagoppstilling
+        </button>
+      </div>
+    </section>
+  );
 }
 
 function displayMatchResult(result) {
@@ -764,13 +1255,14 @@ function MatchCard({
   const matchNo = displayNumber ?? m.number;
   const declinedPlayerIds = Array.isArray(m.declinedPlayerIds) ? m.declinedPlayerIds : [];
   const declinedSet = new Set(declinedPlayerIds);
-  const selectedRows = m.selectedPlayerIds
+  const selectedRowsAll = m.selectedPlayerIds
     .map((id) => state.players.find((p) => p.id === id))
     .filter(Boolean)
     .sort((a, b) => {
       if (a.birthYear !== b.birthYear) return a.birthYear - b.birthYear;
       return a.name.localeCompare(b.name, "sv");
     });
+  const selectedRows = selectedRowsAll.filter((p) => p.available !== false);
   const declinedRows = declinedPlayerIds
     .map((id) => state.players.find((p) => p.id === id))
     .filter(Boolean)
@@ -779,15 +1271,17 @@ function MatchCard({
       return a.name.localeCompare(b.name, "sv");
     });
   const outfieldSlots = useMemo(() => buildOutfieldSlots(formationDraft), [formationDraft]);
+  const selectedLineupIds = useMemo(() => new Set(selectedRows.map((p) => p.id)), [selectedRows]);
   const formationTotal = Number(formationDraft.defenders || 0) + Number(formationDraft.midfielders || 0) + Number(formationDraft.attackers || 0);
   const slotToPlayer = useMemo(() => {
     const map = {};
     for (const [playerId, slotKey] of Object.entries(positionDraftByPlayer || {})) {
+      if (!selectedLineupIds.has(playerId)) continue;
       if (!slotKey || slotKey === "bench") continue;
       if (!map[slotKey]) map[slotKey] = playerId;
     }
     return map;
-  }, [positionDraftByPlayer]);
+  }, [positionDraftByPlayer, selectedLineupIds]);
   const starterIds = Object.values(slotToPlayer).filter(Boolean);
   const startersUnique = new Set(starterIds).size === starterIds.length;
   const startersReady = Boolean(slotToPlayer.gk) && outfieldSlots.every((slot) => Boolean(slotToPlayer[slot.key])) && startersUnique;
@@ -824,8 +1318,8 @@ function MatchCard({
   const plannedBenchPlayers = benchPlayers.filter((p) => plannedBenchByInId.has(p.id));
   const unassignedBenchPlayers = benchPlayers.filter((p) => !plannedBenchByInId.has(p.id));
 
-  const names2015 = selectedRows.filter((p) => p.birthYear === 2015).map((p) => p.name);
-  const names2016 = selectedRows.filter((p) => p.birthYear === 2016).map((p) => p.name);
+  const names2015 = selectedRowsAll.filter((p) => p.birthYear === 2015).map((p) => p.name);
+  const names2016 = selectedRowsAll.filter((p) => p.birthYear === 2016).map((p) => p.name);
 
   const copyTeam = async () => {
     const lines = [];
@@ -1045,7 +1539,7 @@ function MatchCard({
         )}
       </div>}
 
-      {matchSubTab === "lineup" && m.selectedPlayerIds.length > 0 && (
+      {matchSubTab === "lineup" && m.selectedPlayerIds.length > 0 && selectedRows.length > 0 && (
         <div className="group group--flush lineup-panel" style={{ marginBottom: 12 }}>
           <h4 className="panel__title" style={{ fontSize: 15, margin: "0 0 8px" }}>
             Startuppställning (1 målvakt + 6 utespelare)
@@ -1265,6 +1759,9 @@ function MatchCard({
         </div>
       )}
       {matchSubTab === "lineup" && m.selectedPlayerIds.length === 0 && <p className="text-muted">Välj lag först för att sätta laguppställning.</p>}
+      {matchSubTab === "lineup" && m.selectedPlayerIds.length > 0 && selectedRows.length === 0 && (
+        <p className="text-muted">Ingen tillgänglig spelare i truppen för laguppställning just nu.</p>
+      )}
 
       {matchSubTab === "notes" && <div className="match-comments" aria-label="Meddelanden">
         <h4 className="panel__title" style={{ fontSize: 15, margin: "0 0 8px" }}>
@@ -3430,6 +3927,8 @@ export default function App() {
           </div>
         </section>
       )}
+
+      {tab === "test" && <TestLabPanel setErr={setErr} setOkMsg={setOkMsg} />}
 
       {tab === "settings" && (
         <section className="panel" role="tabpanel" id="panel-settings" aria-labelledby="tab-settings">

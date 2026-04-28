@@ -525,6 +525,7 @@ function defaultState() {
     coachNames: [...COACH_NAMES],
     coaches: defaultCoaches(),
     teamLogos: {},
+    testLab: { teams: [], lineups: [] },
   };
 }
 
@@ -692,6 +693,10 @@ function reconcilePlayerStats(state) {
 
 function migrateStateShape(data) {
   let dirty = false;
+  if (!data.testLab || typeof data.testLab !== "object") {
+    data.testLab = { teams: [], lineups: [] };
+    dirty = true;
+  }
   for (const m of data.matches || []) {
     if (m.number === undefined && m.matchNumber !== undefined) {
       m.number = Number(m.matchNumber);
@@ -991,6 +996,8 @@ function normalizeImportedState(raw) {
   backfillIntendedGroups2015(data);
   if (!validateGroups2015(data)) throw new Error("groups2015_invalid");
   if (!validateGroups2016(data)) throw new Error("groups2016_invalid");
+  // Keep testLab separate from core backup by default.
+  if (!data.testLab || typeof data.testLab !== "object") data.testLab = { teams: [], lineups: [] };
   return data;
 }
 
@@ -1151,7 +1158,10 @@ app.get("/api/simulate-season", async (_req, res) => {
 
 app.post("/api/state/import", async (req, res) => {
   try {
+    const existing = await readState();
     const state = normalizeImportedState(req.body);
+    // Preserve testLab to avoid mixing "core" backup with the Test sandbox.
+    state.testLab = existing?.testLab && typeof existing.testLab === "object" ? existing.testLab : { teams: [], lineups: [] };
     await writeState(state);
     res.json(jsonState(state));
   } catch (e) {
@@ -1166,6 +1176,28 @@ app.post("/api/state/import", async (req, res) => {
     }
     return res.status(400).json({ error: "Kunde inte importera backup." });
   }
+});
+
+app.get("/api/testlab/state", async (_req, res) => {
+  const state = await readState();
+  res.json({
+    testLab: state?.testLab && typeof state.testLab === "object" ? state.testLab : { teams: [], lineups: [] },
+    updatedAt: state?.meta?.updatedAt || null,
+    revision: Number(state?.meta?.revision) || 0,
+  });
+});
+
+app.put("/api/testlab/state", async (req, res) => {
+  const state = await readState();
+  const next = req.body?.testLab ?? req.body;
+  if (!next || typeof next !== "object") return res.status(400).json({ error: "Ogiltigt testdata." });
+  state.testLab = next;
+  await writeState(state);
+  res.json({
+    testLab: state.testLab,
+    updatedAt: state?.meta?.updatedAt || null,
+    revision: Number(state?.meta?.revision) || 0,
+  });
 });
 
 app.put("/api/settings/coaches", async (req, res) => {
