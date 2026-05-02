@@ -3880,12 +3880,56 @@ export default function App() {
 
           {rotationView && rotationView.groupsValid === false && (
             <div className="banner banner--error" role="status">
-              Ogiltiga 2015-grupper — öppna <strong>Spelargrupp</strong> och spara A/B/C.
+              <div
+                style={{
+                  display: "flex",
+                  flexWrap: "wrap",
+                  alignItems: "center",
+                  gap: 12,
+                  justifyContent: "space-between",
+                }}
+              >
+                <span>
+                  Ogiltiga 2015-grupper — öppna <strong>Spelargrupp → Grupper</strong> och spara A/B/C.
+                </span>
+                <button
+                  type="button"
+                  className="btn btn--secondary btn--sm"
+                  onClick={() => {
+                    setTab("players");
+                    setPlayerSubTab("groups");
+                  }}
+                >
+                  Öppna Grupper
+                </button>
+              </div>
             </div>
           )}
           {rotationView && rotationView.groups2016Valid === false && (
             <div className="banner banner--error" role="status">
-              Ogiltiga 2016-grupper — öppna <strong>Spelargrupp → Grupper</strong> och spara A/B/C/Extra.
+              <div
+                style={{
+                  display: "flex",
+                  flexWrap: "wrap",
+                  alignItems: "center",
+                  gap: 12,
+                  justifyContent: "space-between",
+                }}
+              >
+                <span>
+                  Ogiltiga 2016-grupper — öppna <strong>Spelargrupp → Grupper</strong> och spara A/B/C/Extra.
+                </span>
+                <button
+                  type="button"
+                  className="btn btn--secondary btn--sm"
+                  onClick={() => {
+                    setTab("players");
+                    setPlayerSubTab("groups");
+                  }}
+                >
+                  Öppna Grupper
+                </button>
+              </div>
             </div>
           )}
 
