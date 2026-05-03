@@ -5,7 +5,9 @@ import path from "path";
 import { fileURLToPath } from "url";
 import { Pool } from "pg";
 import {
+  appendP11Bench2014Players,
   birthYearNum,
+  isAllowedP11SquadPlayer,
   isEligibleForMatchSquad,
   repairGroups2015IfNeeded,
   repairGroups2016IfNeeded,
@@ -23,6 +25,7 @@ import {
   matchSquadMode,
   p11Assist2016Count,
   stripLegacyP10SquadsIfNeeded,
+  repairP11Squad2014IfNeeded,
   compareMatchesChronologically,
 } from "./selection.mjs";
 
@@ -980,6 +983,7 @@ async function readState() {
   if (repairGroups2015IfNeeded(data)) dirty = true;
   if (repairGroups2016IfNeeded(data)) dirty = true;
   if (stripLegacyP10SquadsIfNeeded(data)) dirty = true;
+  if (repairP11Squad2014IfNeeded(data)) dirty = true;
   if (ensureMinimumScheduleFromSeed(data)) dirty = true;
   if (applyRemoteSettingsIfNeeded(data)) dirty = true;
   if (reconcilePlayerStats(data)) dirty = true;
@@ -997,6 +1001,7 @@ function normalizeImportedState(raw) {
   repairGroups2015IfNeeded(data);
   repairGroups2016IfNeeded(data);
   stripLegacyP10SquadsIfNeeded(data);
+  repairP11Squad2014IfNeeded(data);
   ensureMinimumScheduleFromSeed(data);
   reconcilePlayerStats(data);
   backfillIntendedGroups2015(data);
@@ -1503,12 +1508,23 @@ app.post("/api/matches/:id/complete", async (req, res) => {
   if (match.status === "played") return res.status(400).json({ error: "Redan markerad som genomförd" });
   if (!match.selectedPlayerIds?.length) return res.status(400).json({ error: "Välj lag först" });
 
+  const p11Complete = (match.branch || "p10") === "p11";
+  if (p11Complete) {
+    match.selectedPlayerIds = appendP11Bench2014Players(state, [...match.selectedPlayerIds]);
+  }
+
   for (const id of match.selectedPlayerIds) {
     const pl = state.players.find((p) => p.id === id);
     if (!pl) {
       return res.status(400).json({ error: "Truppen innehåller ogiltigt spelar-ID." });
     }
-    if (!isEligibleForMatchSquad(pl)) {
+    if (p11Complete) {
+      if (!isAllowedP11SquadPlayer(pl)) {
+        return res.status(400).json({
+          error: "P11-truppen får bara innehålla spelare födda 2014, 2015 eller 2016.",
+        });
+      }
+    } else if (!isEligibleForMatchSquad(pl)) {
       return res.status(400).json({
         error: "Truppen får bara innehålla spelare födda 2015 eller 2016 (2014 och andra år kan inte matchspela).",
       });

@@ -33,7 +33,8 @@
  *
  * FÖDDA 2014
  * ----------
- * Kan registreras i truppen men tas aldrig ut i P 10- eller P 11-matchtrupp (endast 2015/2016 på plan).
+ * Ingår inte i P 10-matchtrupp. Vid P 11 läggs alla registrerade födda 2014 alltid till i truppen
+ * (bench/med följa) utöver 2015/2016 enligt serieformat.
  */
 
 export const GROUP_ORDER = ["A", "B", "C"];
@@ -45,10 +46,53 @@ export function birthYearNum(p) {
   return Number.isFinite(y) ? y : NaN;
 }
 
-/** Endast födda 2015 och 2016 får plats i matchtrupp (P 10 / P 11). */
+/** Endast födda 2015 och 2016 får plats i P 10-matchtrupp (plan). */
 export function isEligibleForMatchSquad(p) {
   const y = birthYearNum(p);
   return y === 2015 || y === 2016;
+}
+
+/** P 11: födda 2014 får finnas i truppen (läggs till automatiskt). */
+export function isAllowedP11SquadPlayer(p) {
+  const y = birthYearNum(p);
+  return y === 2014 || y === 2015 || y === 2016;
+}
+
+/** Alla registrerade födda 2014, namnordning. */
+export function sortedAllPlayerIds2014(state) {
+  return (state.players || [])
+    .filter((p) => birthYearNum(p) === 2014)
+    .sort((a, b) => a.name.localeCompare(b.name, "sv"))
+    .map((p) => p.id);
+}
+
+/** Lägg till alla 2014 sist i truppen utan dubbletter (P 11). */
+export function appendP11Bench2014Players(state, squadIds) {
+  const seen = new Set(squadIds);
+  const out = [...squadIds];
+  for (const id of sortedAllPlayerIds2014(state)) {
+    if (!seen.has(id)) {
+      seen.add(id);
+      out.push(id);
+    }
+  }
+  return out;
+}
+
+/** Lägg till saknade 2014 i alla icke-spelade P11-matchers trupper (vid laddning). */
+export function repairP11Squad2014IfNeeded(state) {
+  let dirty = false;
+  for (const m of state.matches || []) {
+    if (m.status === "played") continue;
+    if ((m.branch || "p10") !== "p11") continue;
+    const cur = Array.isArray(m.selectedPlayerIds) ? [...m.selectedPlayerIds] : [];
+    const next = appendP11Bench2014Players(state, cur);
+    if (next.length !== cur.length || next.some((id, i) => id !== cur[i])) {
+      m.selectedPlayerIds = next;
+      dirty = true;
+    }
+  }
+  return dirty;
 }
 
 export function isPlayerAvailable(p) {
@@ -528,7 +572,7 @@ export function selectTeamForMatch(state, matchId, opts = {}) {
 
     match.intendedGroup2015 = scheduledGroup2015;
     match.intendedGroup2016 = inferIntendedGroup2016(state.groups2016, ids2016Pick);
-    match.selectedPlayerIds = [...ids2015, ...ids2016Pick];
+    match.selectedPlayerIds = appendP11Bench2014Players(state, [...ids2015, ...ids2016Pick]);
 
     const g15 = groupLabel(scheduledGroup2015);
     const g16 = groupLabel(match.intendedGroup2016);
@@ -556,7 +600,7 @@ export function selectTeamForMatch(state, matchId, opts = {}) {
     const scheduledGroup = computeNextGroup2015(state);
     match.intendedGroup2015 = scheduledGroup;
     match.intendedGroup2016 = null;
-    match.selectedPlayerIds = [...ids];
+    match.selectedPlayerIds = appendP11Bench2014Players(state, [...ids]);
     const gLabel = groupLabel(scheduledGroup);
     const text2015 = `P 11-serie: alla tillgängliga spelare födda 2015 tas ut. Omgången räknas i rotation som ${gLabel}.`;
     const text2016 = "P 11-serie: inga spelare födda 2016 tas ut i den här matchen.";

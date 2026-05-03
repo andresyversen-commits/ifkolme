@@ -1469,9 +1469,11 @@ function MatchCard({
   const squadMode = matchSquadMode(m);
   const series = typeof m.fixture?.series === "string" ? m.fixture.series : "";
   const isP11Series = series.includes("P 11");
+  const isP11Branch = (m.branch || "p10") === "p11";
   const assist2016Target = isP11Series ? p11Assist2016Count(m, state) : 0;
   const n15 = m.selectedPlayerIds.filter((id) => players2015.some((p) => p.id === id)).length;
-  const n16 = m.selectedPlayerIds.length - n15;
+  const n16 = m.selectedPlayerIds.filter((id) => players2016.some((p) => p.id === id)).length;
+  const n14 = m.selectedPlayerIds.filter((id) => birthYearNum(state.players.find((p) => p.id === id)) === 2014).length;
   const [showManual, setShowManual] = useState(false);
   const [manualIds, setManualIds] = useState([]);
   const [showManual2016, setShowManual2016] = useState(false);
@@ -1709,6 +1711,7 @@ function MatchCard({
 
   const names2015 = selectedRowsAll.filter((p) => birthYearNum(p) === 2015).map((p) => p.name);
   const names2016 = selectedRowsAll.filter((p) => birthYearNum(p) === 2016).map((p) => p.name);
+  const names2014 = selectedRowsAll.filter((p) => birthYearNum(p) === 2014).map((p) => p.name);
 
   const copyTeam = async () => {
     const lines = [];
@@ -1722,6 +1725,12 @@ function MatchCard({
     lines.push("2016:");
     if (names2016.length) lines.push(...names2016);
     else lines.push("—");
+    if (isP11Branch) {
+      lines.push("");
+      lines.push("2014 (med i P11-trupp):");
+      if (names2014.length) lines.push(...names2014);
+      else lines.push("—");
+    }
     if (Array.isArray(m.comments) && m.comments.length) {
       lines.push("");
       lines.push("Kommentarer:");
@@ -1914,11 +1923,17 @@ function MatchCard({
           <>
             <p className="match-card__lineup-meta">
               <strong>{m.selectedPlayerIds.length}</strong> spelare
-              {(n15 > 0 || n16 > 0) && (
+              {(n15 > 0 || n16 > 0 || (isP11Branch && n14 > 0)) && (
                 <span className="match-card__lineup-breakdown">
                   {" "}
                   ·{" "}
-                  {[n15 > 0 ? `${n15} födda 2015` : null, n16 > 0 ? `${n16} födda 2016` : null].filter(Boolean).join(" · ")}
+                  {[
+                    n15 > 0 ? `${n15} födda 2015` : null,
+                    n16 > 0 ? `${n16} födda 2016` : null,
+                    isP11Branch && n14 > 0 ? `${n14} födda 2014` : null,
+                  ]
+                    .filter(Boolean)
+                    .join(" · ")}
                 </span>
               )}
             </p>
@@ -3551,8 +3566,8 @@ export default function App() {
         <section className="panel" role="tabpanel" id="panel-players" aria-labelledby="tab-players">
           <h2 className="panel__title">Spelargrupp</h2>
           <p className="panel__lead">
-            Spelare, grupper A/B/C för födda 2015 och 2016 (rotation). Födda 2014 kan registreras men ingår inte i
-            P 10/P 11-matchtrupp. P 10: tre 2015 + alla tillgängliga 2016. Frånvaro: markera ej tillgänglig.
+            Spelare, grupper A/B/C för födda 2015 och 2016 (rotation). Födda 2014 följer automatiskt med i P 11-trupp;
+            de ingår inte i P 10-matchtrupp. P 10: tre 2015 + alla tillgängliga 2016. Frånvaro: markera ej tillgänglig.
           </p>
 
           {rotationView && rotationView.groupsValid === false && (
@@ -3641,7 +3656,7 @@ export default function App() {
                     value={form.birthYear}
                     onChange={(e) => setForm((f) => ({ ...f, birthYear: e.target.value }))}
                   >
-                    <option value="2014">2014 (ej matchtrupp)</option>
+                    <option value="2014">2014 (P11-trupp, ej P10)</option>
                     <option value="2015">2015</option>
                     <option value="2016">2016</option>
                   </select>
@@ -3714,7 +3729,7 @@ export default function App() {
                                       value={editYear}
                                       onChange={(e) => setEditYear(e.target.value)}
                                     >
-                                      <option value="2014">2014 (ej matchtrupp)</option>
+                                      <option value="2014">2014 (P11-trupp, ej P10)</option>
                                       <option value="2015">2015</option>
                                       <option value="2016">2016</option>
                                     </select>
@@ -3794,8 +3809,8 @@ export default function App() {
                               {birthYearNum(p) === 2015 ? (
                                 gLet ? gLet : "—"
                               ) : birthYearNum(p) === 2014 ? (
-                                <span className="text-muted" title="Födda 2014 ingår inte i P 10/P 11-matchtrupp">
-                                  Ej trupp
+                                <span className="text-muted" title="Födda 2014 läggs automatiskt till i P 11-trupp, inte i P 10">
+                                  P11
                                 </span>
                               ) : (
                                 "—"
