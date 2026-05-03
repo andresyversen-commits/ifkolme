@@ -30,6 +30,10 @@
  * GRUPPER 2016
  * ------------
  * Första nio födda 2016 (namnordning) i groups2016 A/B/C (tre per grupp), övriga i groups2016Extra.
+ *
+ * FÖDDA 2014
+ * ----------
+ * Kan registreras i truppen men tas aldrig ut i P 10- eller P 11-matchtrupp (endast 2015/2016 på plan).
  */
 
 export const GROUP_ORDER = ["A", "B", "C"];
@@ -39,6 +43,12 @@ export const MAX_2015_ON_FIELD = 3;
 export function birthYearNum(p) {
   const y = Number(p?.birthYear);
   return Number.isFinite(y) ? y : NaN;
+}
+
+/** Endast födda 2015 och 2016 får plats i matchtrupp (P 10 / P 11). */
+export function isEligibleForMatchSquad(p) {
+  const y = birthYearNum(p);
+  return y === 2015 || y === 2016;
 }
 
 export function isPlayerAvailable(p) {
@@ -565,7 +575,7 @@ export function selectTeamForMatch(state, matchId, opts = {}) {
   } else {
     seed2015 = canonicalIds.filter((id) => {
       const pl = state.players.find((p) => p.id === id);
-      return isPlayerAvailable(pl);
+      return isPlayerAvailable(pl) && isEligibleForMatchSquad(pl);
     });
   }
 

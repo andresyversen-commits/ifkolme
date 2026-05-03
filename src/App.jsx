@@ -1546,7 +1546,13 @@ function MatchCard({
   };
 
   const openCompleteDialog = () => {
-    setReportForm({ result: "", positive: "", negative: "", opponentRating: "" });
+    const r = m.matchReport;
+    setReportForm({
+      result: String(r?.result || ""),
+      positive: String(r?.positive || ""),
+      negative: String(r?.negative || ""),
+      opponentRating: r?.opponentRating != null ? String(r.opponentRating) : "",
+    });
     setMatchDialog("complete");
   };
 
@@ -1751,6 +1757,10 @@ function MatchCard({
           ) : m.status === "played" && m.matchReport?.opponentRating != null ? (
             <span className="match-card__rating-compact" title="Motståndare">
               {m.matchReport.opponentRating}/5
+            </span>
+          ) : m.status === "played" && m.matchReport && matchReportHasContentForCopy(m.matchReport) ? (
+            <span className="badge badge--muted" title="Matchrapport sparad">
+              Rapport
             </span>
           ) : null}
           {m.selectedPlayerIds?.length ? (
@@ -2864,12 +2874,14 @@ export default function App() {
   }, [state?.matches]);
 
   const uniqueAges = state
-    ? [...new Set(state.players.map((p) => playerAge(p.birthYear)))].sort((a, b) => a - b)
+    ? [...new Set(state.players.map((p) => playerAge(birthYearNum(p))).filter((a) => Number.isFinite(a)))].sort(
+        (a, b) => a - b,
+      )
     : [];
 
   const playersOverview = playersSorted.filter((p) => {
-    if (overviewBirth !== "all" && p.birthYear !== Number(overviewBirth)) return false;
-    if (overviewAge !== "all" && playerAge(p.birthYear) !== Number(overviewAge)) return false;
+    if (overviewBirth !== "all" && birthYearNum(p) !== Number(overviewBirth)) return false;
+    if (overviewAge !== "all" && playerAge(birthYearNum(p)) !== Number(overviewAge)) return false;
     return true;
   });
 
@@ -3261,6 +3273,8 @@ export default function App() {
         Status: m.status === "played" ? "Spelad" : (m.selectedPlayerIds || []).length ? "Lag valt" : "Ej vald",
         Resultat: m.matchReport?.result ?? "—",
         "Motståndare (1–5)": m.matchReport?.opponentRating ?? "—",
+        "Rapport positivt": m.matchReport?.positive ?? "—",
+        "Rapport minus": m.matchReport?.negative ?? "—",
       })),
     );
     const commentRows = [];
@@ -3415,8 +3429,8 @@ export default function App() {
         <section className="panel" role="tabpanel" id="panel-players" aria-labelledby="tab-players">
           <h2 className="panel__title">Spelargrupp</h2>
           <p className="panel__lead">
-            Spelare, grupper A/B/C för födda 2015 och 2016 (rotation). P 10-matcher: tre 2015 + alla tillgängliga
-            2016. Frånvaro: markera ej tillgänglig.
+            Spelare, grupper A/B/C för födda 2015 och 2016 (rotation). Födda 2014 kan registreras men ingår inte i
+            P 10/P 11-matchtrupp. P 10: tre 2015 + alla tillgängliga 2016. Frånvaro: markera ej tillgänglig.
           </p>
 
           {rotationView && rotationView.groupsValid === false && (
@@ -3505,6 +3519,7 @@ export default function App() {
                     value={form.birthYear}
                     onChange={(e) => setForm((f) => ({ ...f, birthYear: e.target.value }))}
                   >
+                    <option value="2014">2014 (ej matchtrupp)</option>
                     <option value="2015">2015</option>
                     <option value="2016">2016</option>
                   </select>
@@ -3577,6 +3592,7 @@ export default function App() {
                                       value={editYear}
                                       onChange={(e) => setEditYear(e.target.value)}
                                     >
+                                      <option value="2014">2014 (ej matchtrupp)</option>
                                       <option value="2015">2015</option>
                                       <option value="2016">2016</option>
                                     </select>
@@ -3652,7 +3668,17 @@ export default function App() {
                             <td data-label="Nr">{p.jerseyNumber || "—"}</td>
                             <td data-label="Position">{p.preferredPosition || "—"}</td>
                             <td data-label="År">{p.birthYear}</td>
-                            <td data-label="Grupp">{birthYearNum(p) === 2015 ? (gLet ? gLet : "—") : "—"}</td>
+                            <td data-label="Grupp">
+                              {birthYearNum(p) === 2015 ? (
+                                gLet ? gLet : "—"
+                              ) : birthYearNum(p) === 2014 ? (
+                                <span className="text-muted" title="Födda 2014 ingår inte i P 10/P 11-matchtrupp">
+                                  Ej trupp
+                                </span>
+                              ) : (
+                                "—"
+                              )}
+                            </td>
                             <td data-label="Matcher">{p.matchesPlayed}</td>
                             <td data-label="Senast">{p.lastPlayedMatchNumber != null ? p.lastPlayedMatchNumber : "—"}</td>
                             <td data-label="Status">
@@ -4127,11 +4153,12 @@ export default function App() {
             </span>
           </p>
 
-          <div className="filter-block">
+            <div className="filter-block">
             <span className="filter-block__label">Lag / födelseår</span>
             <div className="segmented segmented--filter" role="group" aria-label="Filtrera på födelseår">
               {[
-                { id: "all", label: "Båda" },
+                { id: "all", label: "Alla" },
+                { id: "2014", label: "2014" },
                 { id: "2015", label: "2015" },
                 { id: "2016", label: "2016" },
               ].map((o) => (

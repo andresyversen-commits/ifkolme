@@ -6,6 +6,7 @@ import { fileURLToPath } from "url";
 import { Pool } from "pg";
 import {
   birthYearNum,
+  isEligibleForMatchSquad,
   repairGroups2015IfNeeded,
   repairGroups2016IfNeeded,
   validateGroups2015,
@@ -657,17 +658,6 @@ function normalizeMatchReportPayload(raw) {
   return { result, positive, negative, opponentRating };
 }
 
-function matchReportHasContent(r) {
-  if (!r || typeof r !== "object") return false;
-  const { result, positive, negative, opponentRating } = r;
-  return Boolean(
-    String(result || "").trim() ||
-      String(positive || "").trim() ||
-      String(negative || "").trim() ||
-      opponentRating != null,
-  );
-}
-
 function reconcilePlayerStats(state) {
   let dirty = false;
   for (const m of state.matches) {
@@ -811,10 +801,7 @@ function migrateStateShape(data) {
         dirty = true;
       } else {
         const n = normalizeMatchReportPayload(m.matchReport);
-        if (!matchReportHasContent(n)) {
-          m.matchReport = null;
-          dirty = true;
-        } else if (JSON.stringify(n) !== JSON.stringify(m.matchReport)) {
+        if (JSON.stringify(n) !== JSON.stringify(m.matchReport)) {
           m.matchReport = n;
           dirty = true;
         }
@@ -1019,8 +1006,7 @@ function syncMatchShape(state) {
       if (typeof m.matchReport !== "object" || Array.isArray(m.matchReport)) {
         m.matchReport = null;
       } else {
-        const n = normalizeMatchReportPayload(m.matchReport);
-        m.matchReport = matchReportHasContent(n) ? n : null;
+        m.matchReport = normalizeMatchReportPayload(m.matchReport);
       }
     }
   }
@@ -1280,7 +1266,7 @@ app.put("/api/groups2015", async (req, res) => {
 app.post("/api/players", async (req, res) => {
   const { name, birthYear, jerseyNumber, preferredPosition } = req.body;
   const year = Number(birthYear);
-  if (!name || (year !== 2015 && year !== 2016)) {
+  if (!name || (year !== 2014 && year !== 2015 && year !== 2016)) {
     return res.status(400).json({ error: "Ogiltig spelare" });
   }
   const state = await readState();
@@ -1364,7 +1350,7 @@ app.put("/api/players/:id", async (req, res) => {
   if (name != null) p.name = String(name).trim();
   if (birthYear != null) {
     const y = Number(birthYear);
-    if (y !== 2015 && y !== 2016) return res.status(400).json({ error: "Ogiltigt födelseår" });
+    if (y !== 2014 && y !== 2015 && y !== 2016) return res.status(400).json({ error: "Ogiltigt födelseår" });
     p.birthYear = y;
   }
   if (available !== undefined && available !== null) {
@@ -1499,6 +1485,11 @@ app.post("/api/matches/:id/complete", async (req, res) => {
     if (!pl || !isPlayerAvailable(pl)) {
       return res.status(400).json({ error: "Alla valda spelare måste vara tillgängliga." });
     }
+    if (!isEligibleForMatchSquad(pl)) {
+      return res.status(400).json({
+        error: "Truppen får bara innehålla spelare födda 2015 eller 2016 (2014 och andra år kan inte matchspela).",
+      });
+    }
   }
 
   const count2015 = match.selectedPlayerIds.filter((id) => {
@@ -1563,7 +1554,7 @@ app.post("/api/matches/:id/complete", async (req, res) => {
   }
 
   const normalizedReport = normalizeMatchReportPayload(req.body?.matchReport ?? req.body ?? {});
-  match.matchReport = matchReportHasContent(normalizedReport) ? normalizedReport : null;
+  match.matchReport = normalizedReport;
 
   match.status = "played";
   reconcilePlayerStats(state);
@@ -1580,7 +1571,7 @@ app.put("/api/matches/:id/report", async (req, res) => {
       return res.status(400).json({ error: "Endast genomförda matcher kan ha rapport" });
     }
     const normalizedReport = normalizeMatchReportPayload(req.body?.matchReport ?? req.body ?? {});
-    match.matchReport = matchReportHasContent(normalizedReport) ? normalizedReport : null;
+    match.matchReport = normalizedReport;
     await writeState(state);
     res.json(jsonState(state));
   } catch (e) {
