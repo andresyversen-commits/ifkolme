@@ -654,11 +654,6 @@ body {
   grid-template-columns: minmax(0, 1.2fr) auto auto minmax(3.5rem, auto);
 }
 
-.stat-list--5col .stat-head,
-.stat-list--5col .stat-row {
-  grid-template-columns: minmax(0, 1.2fr) auto auto auto minmax(3.5rem, auto);
-}
-
 .stat-row {
   display: grid;
   grid-template-columns: 1fr auto minmax(3rem, auto);
@@ -667,6 +662,20 @@ body {
   padding: 14px 16px;
   border-bottom: 1px solid var(--separator);
   min-height: 52px;
+}
+
+/* Fem kolumner: explicita minbredder så Antal matcher / Tackat nej hamnar under rätt rubrik (mobil). */
+.stat-list.stat-list--5col > .stat-head,
+.stat-list.stat-list--5col > .stat-row {
+  display: grid;
+  grid-template-columns:
+    minmax(0, 1fr)
+    minmax(2.75rem, 3.25rem)
+    minmax(5.75rem, 1fr)
+    minmax(5.75rem, 1fr)
+    minmax(3.25rem, 4rem);
+  column-gap: 14px;
+  row-gap: 6px;
 }
 
 .stat-row:last-child {
@@ -728,7 +737,10 @@ body {
 }
 
 .stat-list--5col .stat-head span:nth-child(3),
-.stat-list--5col .stat-head span:nth-child(4),
+.stat-list--5col .stat-head span:nth-child(4) {
+  text-align: center;
+}
+
 .stat-list--5col .stat-head span:nth-child(5) {
   text-align: right;
 }
@@ -740,7 +752,14 @@ body {
   font-size: 17px;
 }
 
-.stat-list--5col .stat-row__declined,
+.stat-list--5col .stat-row__value,
+.stat-list--5col .stat-row__declined {
+  text-align: center;
+  font-variant-numeric: tabular-nums;
+  font-weight: 700;
+  font-size: 18px;
+}
+
 .stat-list--5col .stat-row__last {
   text-align: right;
   font-variant-numeric: tabular-nums;

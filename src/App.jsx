@@ -2643,7 +2643,8 @@ export default function App() {
   const [editYear, setEditYear] = useState("2016");
   const [editJerseyNumber, setEditJerseyNumber] = useState("");
   const [editPreferredPosition, setEditPreferredPosition] = useState("");
-  const [overviewBirth, setOverviewBirth] = useState("all");
+  /** Statistik: p10 = födda 2015+2016, club = alla registrerade. */
+  const [overviewBirth, setOverviewBirth] = useState("p10");
   const [overviewAge, setOverviewAge] = useState("all");
   /** Underflikar inom Spelargrupp: spelarlista, grupper eller tränare */
   const [playerSubTab, setPlayerSubTab] = useState("players");
@@ -2755,7 +2756,12 @@ export default function App() {
       if (ui) {
         const parsedUi = JSON.parse(ui);
         if (parsedUi?.playerSubTab) setPlayerSubTab(parsedUi.playerSubTab);
-        if (parsedUi?.overviewBirth) setOverviewBirth(parsedUi.overviewBirth);
+        if (parsedUi?.overviewBirth) {
+          let ob = parsedUi.overviewBirth;
+          if (ob === "all") ob = "p10";
+          if (!["p10", "club", "2014", "2015", "2016"].includes(ob)) ob = "p10";
+          setOverviewBirth(ob);
+        }
         if (parsedUi?.overviewAge) setOverviewAge(parsedUi.overviewAge);
         if (parsedUi?.activeMatchId) setActiveMatchId(parsedUi.activeMatchId);
         if (parsedUi?.icsUrl) setIcsUrl(parsedUi.icsUrl);
@@ -2932,8 +2938,16 @@ export default function App() {
       )
     : [];
 
-  const playersOverview = playersSorted.filter((p) => {
-    if (overviewBirth !== "all" && birthYearNum(p) !== Number(overviewBirth)) return false;
+  const playersAfterBirthFilter = useMemo(() => {
+    return playersSorted.filter((p) => {
+      const y = birthYearNum(p);
+      if (overviewBirth === "p10") return y === 2015 || y === 2016;
+      if (overviewBirth === "club") return true;
+      return y === Number(overviewBirth);
+    });
+  }, [playersSorted, overviewBirth]);
+
+  const playersOverview = playersAfterBirthFilter.filter((p) => {
     if (overviewAge !== "all" && playerAge(birthYearNum(p)) !== Number(overviewAge)) return false;
     return true;
   });
@@ -4202,30 +4216,39 @@ export default function App() {
               Genomförda matcher: <strong>{matchesCompleted}</strong> / {matchesTotal}
             </span>
             <span>
-              Visar <strong>{playersOverview.length}</strong> av {playersSorted.length} spelare
+              Visar <strong>{playersOverview.length}</strong> av <strong>{playersAfterBirthFilter.length}</strong>{" "}
+              enligt födelseår
+              {overviewAge !== "all" ? " (åldersfilter aktivt)" : ""}
             </span>
           </p>
 
-            <div className="filter-block">
-            <span className="filter-block__label">Lag / födelseår</span>
-            <div className="segmented segmented--filter" role="group" aria-label="Filtrera på födelseår">
+          <div className="filter-block">
+            <span className="filter-block__label">P10-statistik / födelseår</span>
+            <div className="segmented segmented--filter" role="group" aria-label="P10-statistik efter födelseår">
               {[
-                { id: "all", label: "Alla" },
-                { id: "2014", label: "2014" },
+                { id: "p10", label: "Alla P10" },
                 { id: "2015", label: "2015" },
                 { id: "2016", label: "2016" },
+                { id: "club", label: "Hela truppen" },
               ].map((o) => (
                 <button
                   key={o.id}
                   type="button"
                   className="segmented__btn"
                   aria-selected={overviewBirth === o.id}
-                  onClick={() => setOverviewBirth(o.id)}
+                  onClick={() => {
+                    setOverviewBirth(o.id);
+                    setOverviewAge("all");
+                  }}
                 >
                   {o.label}
                 </button>
               ))}
             </div>
+            <p className="text-muted" style={{ margin: "8px 0 0", fontSize: 13 }}>
+              Alla P10 visar spelare födda 2015 och 2016. Hela truppen inkluderar även 2014 m.m. Åldersfiltret nedan
+              kan dölja rader om det inte är &quot;Alla&quot;.
+            </p>
           </div>
 
           <div className="filter-block">
@@ -4270,10 +4293,12 @@ export default function App() {
                     {p.name}
                     <span style={{ fontWeight: 400, color: "var(--text-secondary)", fontSize: 14 }}>
                       {" "}
-                      · {playerAge(p.birthYear)} år
+                      · {playerAge(birthYearNum(p))} år
                     </span>
                   </p>
-                  <span className="stat-row__year">{p.birthYear}</span>
+                  <span className="stat-row__year">
+                    {Number.isFinite(birthYearNum(p)) ? birthYearNum(p) : "—"}
+                  </span>
                   <span className="stat-row__value">{p.matchesPlayed}</span>
                   <span className="stat-row__declined">{declineCountByPlayer.get(p.id) || 0}</span>
                   <span className="stat-row__last">{p.lastPlayedMatchNumber != null ? p.lastPlayedMatchNumber : "—"}</span>
