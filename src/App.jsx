@@ -1012,7 +1012,13 @@ function parseMonthKey(key) {
 }
 
 /** Truppvisning: samma namn-/år-typografi som översikten, sorterat 2015 först. */
-function MatchLineupNames({ playerIds, players, declinedPlayerIds = [], canToggleAvailability = false, onToggleAvailability }) {
+function MatchLineupNames({
+  playerIds,
+  players,
+  declinedPlayerIds = [],
+  canToggleAvailability = false,
+  onAttendanceAction,
+}) {
   const declinedSet = useMemo(() => new Set(declinedPlayerIds || []), [declinedPlayerIds]);
   const rows = useMemo(() => {
     return [...playerIds]
@@ -1031,18 +1037,47 @@ function MatchLineupNames({ playerIds, players, declinedPlayerIds = [], canToggl
         <li key={p.id} className="lineup-list__row">
           <span className="lineup-list__name">
             {p.name}
-            {declinedSet.has(p.id) ? <span className="lineup-list__status">Tackat nej</span> : null}
-            {p.available === false ? <span className="lineup-list__status">Ej tillgänglig</span> : null}
+            {p.available === false ? (
+              <span className="lineup-list__status" title="Global frånvaro">
+                {p.unavailableReason === "other" ? "Ej tillgänglig" : "Sjuk / frånvaro"}
+              </span>
+            ) : null}
+            {declinedSet.has(p.id) && p.available !== false ? (
+              <span className="lineup-list__status" title="Endast denna match">
+                Tackar nej
+              </span>
+            ) : null}
           </span>
           <span className="lineup-list__year">{p.birthYear}</span>
           {canToggleAvailability ? (
-            <button
-              type="button"
-              className={`btn btn--sm ${p.available === false ? "btn--secondary" : "btn--plain"} lineup-list__availability-btn`}
-              onClick={() => onToggleAvailability?.(p)}
-            >
-              {p.available === false ? "Markera tillgänglig" : "Markera otillgänglig"}
-            </button>
+            <span className="lineup-list__actions lineup-list__availability-btn">
+              {p.available === false ? (
+                <button
+                  type="button"
+                  className="btn btn--sm btn--secondary"
+                  onClick={() => onAttendanceAction?.(p, "clear_sick")}
+                >
+                  Kryssa tillgänglig
+                </button>
+              ) : declinedSet.has(p.id) ? (
+                <button
+                  type="button"
+                  className="btn btn--sm btn--secondary"
+                  onClick={() => onAttendanceAction?.(p, "clear_declined")}
+                >
+                  Ångra tack nej
+                </button>
+              ) : (
+                <>
+                  <button type="button" className="btn btn--sm btn--plain" onClick={() => onAttendanceAction?.(p, "sick")}>
+                    Sjuk / frånvaro
+                  </button>
+                  <button type="button" className="btn btn--sm btn--plain" onClick={() => onAttendanceAction?.(p, "declined")}>
+                    Tackar nej
+                  </button>
+                </>
+              )}
+            </span>
           ) : null}
         </li>
       ))}
@@ -1599,9 +1634,11 @@ function MatchCard({
       return a.name.localeCompare(b.name, "sv");
     });
   const selectedRows = selectedRowsAll.filter((p) => p.available !== false);
+  const sickInSquadRows = selectedRowsAll.filter((p) => p.available === false);
   const declinedRows = declinedPlayerIds
     .map((id) => state.players.find((p) => p.id === id))
     .filter(Boolean)
+    .filter((p) => (m.selectedPlayerIds || []).includes(p.id) && p.available !== false)
     .sort((a, b) => {
       if (a.birthYear !== b.birthYear) return a.birthYear - b.birthYear;
       return a.name.localeCompare(b.name, "sv");
@@ -1695,34 +1732,44 @@ function MatchCard({
     if (typeof onCopied === "function") onCopied("Lag kopierat till urklipp.");
   };
 
-  const togglePlayerAvailability = async (player) => {
+  const handleAttendanceAction = async (player, kind) => {
     setErr("");
     try {
-      const willBecomeUnavailable = player.available !== false;
-      await api(`/api/players/${player.id}`, {
-        method: "PUT",
-        body: { available: !willBecomeUnavailable },
-      });
-      if (
-        willBecomeUnavailable &&
-        m.status !== "played" &&
-        Array.isArray(m.selectedPlayerIds) &&
-        m.selectedPlayerIds.includes(player.id)
-      ) {
+      if (kind === "sick") {
+        await api(`/api/players/${player.id}`, {
+          method: "PUT",
+          body: { available: false, unavailableReason: "sick" },
+        });
+        if (
+          m.status !== "played" &&
+          Array.isArray(m.selectedPlayerIds) &&
+          m.selectedPlayerIds.includes(player.id)
+        ) {
+          const wantsReplacement = confirm(
+            `${player.name} markerades som sjuk/frånvarande. Vill du uppdatera laget automatiskt med nästa i kön nu?`,
+          );
+          if (wantsReplacement) {
+            await api(`/api/matches/${m.id}/select`, { method: "POST" });
+            if (typeof onCopied === "function") onCopied("Laget uppdaterat med nästa i kön.");
+          }
+        }
+      } else if (kind === "declined") {
         await api(`/api/matches/${m.id}/decline`, {
           method: "PUT",
           body: { playerId: player.id, declined: true },
         });
-        const wantsReplacement = confirm(
-          `${player.name} markerades som otillgänglig. Vill du ersätta med nästa spelare i kön nu?`,
-        );
-        if (wantsReplacement) {
-          await api(`/api/matches/${m.id}/select`, {
-            method: "POST",
+      } else if (kind === "clear_sick") {
+        await api(`/api/players/${player.id}`, {
+          method: "PUT",
+          body: { available: true },
+        });
+        if (declinedSet.has(player.id)) {
+          await api(`/api/matches/${m.id}/decline`, {
+            method: "PUT",
+            body: { playerId: player.id, declined: false },
           });
-          if (typeof onCopied === "function") onCopied("Laget uppdaterat med nästa i kön.");
         }
-      } else if (!willBecomeUnavailable && declinedSet.has(player.id)) {
+      } else if (kind === "clear_declined") {
         await api(`/api/matches/${m.id}/decline`, {
           method: "PUT",
           body: { playerId: player.id, declined: false },
@@ -1864,13 +1911,19 @@ function MatchCard({
               players={state.players}
               declinedPlayerIds={declinedPlayerIds}
               canToggleAvailability={m.status !== "played"}
-              onToggleAvailability={(p) => {
-                togglePlayerAvailability(p).catch(() => null);
+              onAttendanceAction={(p, kind) => {
+                handleAttendanceAction(p, kind).catch(() => null);
               }}
             />
+            {sickInSquadRows.length > 0 ? (
+              <p className="text-muted" style={{ marginTop: 8 }}>
+                Sjuk / frånvaro i truppen:{" "}
+                {sickInSquadRows.map((p) => `${p.name} (${p.birthYear})`).join(", ")}
+              </p>
+            ) : null}
             {declinedRows.length > 0 ? (
               <p className="text-muted" style={{ marginTop: 8 }}>
-                Tackat nej: {declinedRows.map((p) => `${p.name} (${p.birthYear})`).join(", ")}
+                Tackar nej till matchen: {declinedRows.map((p) => `${p.name} (${p.birthYear})`).join(", ")}
               </p>
             ) : null}
           </>
@@ -3696,12 +3749,12 @@ export default function App() {
                                   onClick={async () => {
                                     setErr("");
                                     const cur = p.available !== false;
-                                    try {
-                                      await api(`/api/players/${p.id}`, {
-                                        method: "PUT",
-                                        body: { available: !cur },
-                                      });
-                                      await load();
+                                      try {
+                                        await api(`/api/players/${p.id}`, {
+                                          method: "PUT",
+                                          body: !cur ? { available: false, unavailableReason: "sick" } : { available: true },
+                                        });
+                                        await load();
                                     } catch (x) {
                                       setErr(x.message);
                                     }

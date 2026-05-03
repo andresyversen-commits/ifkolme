@@ -208,13 +208,6 @@ function syncFixturesFromIcs(state, fixtures) {
   };
 }
 
-function expectedAvailableIdsByYear(state, year) {
-  return state.players
-    .filter((p) => birthYearNum(p) === year && isPlayerAvailable(p))
-    .map((p) => p.id)
-    .sort();
-}
-
 function normalizeTeamKey(name) {
   return String(name || "")
     .normalize("NFKD")
@@ -440,12 +433,6 @@ function applyRemoteSettingsIfNeeded(state) {
   return dirty;
 }
 
-function sameSortedIdSets(a, b) {
-  const sa = [...a].sort();
-  const sb = [...b].sort();
-  return sa.length === sb.length && sa.every((v, i) => v === sb[i]);
-}
-
 function initialPlayers() {
   const p2015 = Array.from({ length: 9 }, (_, i) => ({
     id: `p2015-${i + 1}`,
@@ -456,6 +443,7 @@ function initialPlayers() {
     matchesPlayed: 0,
     lastPlayedMatchNumber: null,
     available: true,
+    unavailableReason: null,
   }));
   const p2016 = Array.from({ length: 10 }, (_, i) => ({
     id: `p2016-${i + 1}`,
@@ -466,6 +454,7 @@ function initialPlayers() {
     matchesPlayed: 0,
     lastPlayedMatchNumber: null,
     available: true,
+    unavailableReason: null,
   }));
   return [...p2015, ...p2016];
 }
@@ -591,6 +580,18 @@ function migrateAvailability(data) {
         dirty = true;
       }
     }
+    if (p.unavailableReason !== undefined && p.unavailableReason !== null && typeof p.unavailableReason !== "string") {
+      p.unavailableReason = null;
+      dirty = true;
+    }
+    if (p.available !== false && p.unavailableReason) {
+      p.unavailableReason = null;
+      dirty = true;
+    }
+    if (p.available === false && (p.unavailableReason === undefined || p.unavailableReason === null || p.unavailableReason === "")) {
+      p.unavailableReason = "sick";
+      dirty = true;
+    }
     if (p.available === undefined) {
       p.available = true;
       dirty = true;
@@ -658,6 +659,16 @@ function normalizeMatchReportPayload(raw) {
   return { result, positive, negative, opponentRating };
 }
 
+/** Räknas som deltagen i en genomförd match: vald, inte tackat nej, och tillgänglig (globalt). */
+function playerCountsAsPlayedInMatch(m, playerId, state) {
+  if (!m.selectedPlayerIds?.includes(playerId)) return false;
+  if (Array.isArray(m.declinedPlayerIds) && m.declinedPlayerIds.includes(playerId)) return false;
+  const pl = state.players.find((x) => x.id === playerId);
+  if (!pl || !isEligibleForMatchSquad(pl)) return false;
+  if (!isPlayerAvailable(pl)) return false;
+  return true;
+}
+
 function reconcilePlayerStats(state) {
   let dirty = false;
   for (const m of state.matches) {
@@ -671,7 +682,7 @@ function reconcilePlayerStats(state) {
     let n = 0;
     let lastM = null;
     for (const m of played) {
-      if (m.selectedPlayerIds?.includes(p.id)) {
+      if (playerCountsAsPlayedInMatch(m, p.id, state)) {
         n++;
         if (!lastM || compareMatchesChronologically(m, lastM) > 0) lastM = m;
       }
@@ -1280,6 +1291,7 @@ app.post("/api/players", async (req, res) => {
     matchesPlayed: 0,
     lastPlayedMatchNumber: null,
     available: true,
+    unavailableReason: null,
   });
   repairGroups2015IfNeeded(state);
   repairGroups2016IfNeeded(state);
@@ -1346,7 +1358,8 @@ app.put("/api/players/:id", async (req, res) => {
   const state = await readState();
   const p = state.players.find((x) => x.id === req.params.id);
   if (!p) return res.status(404).json({ error: "Hittades inte" });
-  const { name, birthYear, available, jerseyNumber, preferredPosition } = req.body;
+  const { name, birthYear, available, unavailableReason, jerseyNumber, preferredPosition } = req.body;
+  const absenceReasons = new Set(["sick", "other"]);
   if (name != null) p.name = String(name).trim();
   if (birthYear != null) {
     const y = Number(birthYear);
@@ -1355,6 +1368,16 @@ app.put("/api/players/:id", async (req, res) => {
   }
   if (available !== undefined && available !== null) {
     p.available = Boolean(available);
+    if (p.available) p.unavailableReason = null;
+    else if (unavailableReason === undefined) p.unavailableReason = "sick";
+  }
+  if (unavailableReason !== undefined && unavailableReason !== null) {
+    if (p.available) {
+      p.unavailableReason = null;
+    } else {
+      const r = String(unavailableReason).trim();
+      p.unavailableReason = absenceReasons.has(r) ? r : "sick";
+    }
   }
   if (jerseyNumber !== undefined) {
     p.jerseyNumber = Number.isFinite(Number(jerseyNumber)) ? Math.max(1, Math.floor(Number(jerseyNumber))) : null;
@@ -1482,8 +1505,8 @@ app.post("/api/matches/:id/complete", async (req, res) => {
 
   for (const id of match.selectedPlayerIds) {
     const pl = state.players.find((p) => p.id === id);
-    if (!pl || !isPlayerAvailable(pl)) {
-      return res.status(400).json({ error: "Alla valda spelare måste vara tillgängliga." });
+    if (!pl) {
+      return res.status(400).json({ error: "Truppen innehåller ogiltigt spelar-ID." });
     }
     if (!isEligibleForMatchSquad(pl)) {
       return res.status(400).json({
@@ -1503,12 +1526,9 @@ app.post("/api/matches/:id/complete", async (req, res) => {
   const mode = matchSquadMode(match);
   if (mode === "p11Mixed") {
     const nAssist = p11Assist2016Count(match, state);
-    const want2015 = expectedAvailableIdsByYear(state, 2015);
     const sel2015 = match.selectedPlayerIds.filter((id) => birthYearNum(state.players.find((p) => p.id === id)) === 2015);
-    if (!sameSortedIdSets(sel2015, want2015)) {
-      return res.status(400).json({
-        error: "Alla tillgängliga födda 2015 krävs. Välj lag på nytt om tillgänglighet ändrats.",
-      });
+    if (sel2015.length < 1) {
+      return res.status(400).json({ error: "Minst en spelare födda 2015 krävs i truppen." });
     }
     if (count2016 !== nAssist) {
       return res.status(400).json({
@@ -1519,22 +1539,17 @@ app.post("/api/matches/:id/complete", async (req, res) => {
     if (count2016 !== 0) {
       return res.status(400).json({ error: "P11-seriematcher får endast innehålla spelare födda 2015." });
     }
-    const want = expectedAvailableIdsByYear(state, 2015);
-    if (!sameSortedIdSets(match.selectedPlayerIds, want)) {
-      return res.status(400).json({
-        error: "Alla tillgängliga födda 2015 krävs. Välj lag på nytt om tillgänglighet ändrats.",
-      });
+    if (count2015 < 1) {
+      return res.status(400).json({ error: "Minst en spelare födda 2015 krävs i truppen." });
     }
   } else {
+    // P 10 / blandat: tillåt genomförd match även om frånvaro ändrats efter lagval (ingen ersättare krävs).
     if (count2015 !== MAX_2015) {
       return res.status(400).json({ error: "Exakt tre spelare födda 2015 krävs för att genomföra matchen." });
     }
-    const want2016 = expectedAvailableIdsByYear(state, 2016);
     const sel2016 = match.selectedPlayerIds.filter((id) => birthYearNum(state.players.find((p) => p.id === id)) === 2016);
-    if (!sameSortedIdSets(sel2016, want2016)) {
-      return res.status(400).json({
-        error: "Alla tillgängliga födda 2016 och exakt tre födda 2015 krävs. Välj lag på nytt om tillgänglighet ändrats.",
-      });
+    if (sel2016.length < 1) {
+      return res.status(400).json({ error: "Minst en spelare födda 2016 krävs i den valda truppen." });
     }
   }
 

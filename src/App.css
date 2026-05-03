@@ -1580,6 +1580,15 @@ body {
   justify-self: end;
 }
 
+.lineup-list__actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  align-items: center;
+  justify-content: flex-end;
+  justify-self: end;
+}
+
 .lineup-pitch {
   margin-top: 8px;
   width: 100%;
@@ -2587,9 +2596,11 @@ body {
     grid-template-columns: 1fr auto;
   }
 
-  .lineup-list__availability-btn {
+  .lineup-list__availability-btn,
+  .lineup-list__actions {
     grid-column: 1 / -1;
     justify-self: start;
+    justify-content: flex-start;
   }
 
   .lineup-pitch__surface {
