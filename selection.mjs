@@ -35,6 +35,12 @@
 export const GROUP_ORDER = ["A", "B", "C"];
 export const MAX_2015_ON_FIELD = 3;
 
+/** JSON/DB kan ge födelseår som sträng; jämför alltid som tal. */
+export function birthYearNum(p) {
+  const y = Number(p?.birthYear);
+  return Number.isFinite(y) ? y : NaN;
+}
+
 export function isPlayerAvailable(p) {
   return p && p.available !== false;
 }
@@ -55,7 +61,7 @@ export function groupLabel(g) {
 
 /** Bygg A/B/C från första nio 2015-spelarna (namnordning). Övriga 2015 ignoreras här. */
 export function buildGroups2015FromPlayers(players) {
-  const p2015 = players.filter((p) => p.birthYear === 2015).sort((a, b) => a.name.localeCompare(b.name, "sv"));
+  const p2015 = players.filter((p) => birthYearNum(p) === 2015).sort((a, b) => a.name.localeCompare(b.name, "sv"));
   const ids = p2015.map((p) => p.id).slice(0, 9);
   return {
     A: ids.slice(0, 3),
@@ -66,7 +72,7 @@ export function buildGroups2015FromPlayers(players) {
 
 /** Första nio födda 2016 → A/B/C (tre vardera), övriga i `groups2016Extra`. */
 export function buildGroups2016FromPlayers(players) {
-  const p2016 = players.filter((p) => p.birthYear === 2016).sort((a, b) => a.name.localeCompare(b.name, "sv"));
+  const p2016 = players.filter((p) => birthYearNum(p) === 2016).sort((a, b) => a.name.localeCompare(b.name, "sv"));
   const ids = p2016.map((p) => p.id);
   if (ids.length < 9) {
     return {
@@ -89,7 +95,7 @@ export function buildGroups2016FromPlayers(players) {
  * (kräver nio spelare födda 2015 totalt).
  */
 export function validateGroups2015(state) {
-  const p2015 = state.players.filter((p) => p.birthYear === 2015);
+  const p2015 = state.players.filter((p) => birthYearNum(p) === 2015);
   if (p2015.length !== 9) return false;
   const g = state.groups2015;
   if (!g || !Array.isArray(g.A) || !Array.isArray(g.B) || !Array.isArray(g.C)) return false;
@@ -123,7 +129,7 @@ export function validateGroups2016(state) {
   const extra = state.groups2016Extra;
   if (!g || !Array.isArray(g.A) || !Array.isArray(g.B) || !Array.isArray(g.C)) return false;
   if (!Array.isArray(extra)) return false;
-  const p2016 = state.players.filter((p) => p.birthYear === 2016);
+  const p2016 = state.players.filter((p) => birthYearNum(p) === 2016);
   const set2016 = new Set(p2016.map((p) => p.id));
   const inGroups = [...g.A, ...g.B, ...g.C];
   if (p2016.length < 9) {
@@ -195,12 +201,12 @@ export function getLastPlayedSelectionIds(matches) {
 
 export function getLastPlayed2015Ids(matches, players) {
   const ids = getLastPlayedSelectionIds(matches);
-  return ids.filter((id) => players.find((p) => p.id === id && p.birthYear === 2015));
+  return ids.filter((id) => players.find((p) => p.id === id && birthYearNum(p) === 2015));
 }
 
 export function getLastPlayed2016Ids(matches, players) {
   const ids = getLastPlayedSelectionIds(matches);
-  return ids.filter((id) => players.find((p) => p.id === id && p.birthYear === 2016));
+  return ids.filter((id) => players.find((p) => p.id === id && birthYearNum(p) === 2016));
 }
 
 export function lastCompletedMatchWith2016Group(state) {
@@ -260,7 +266,7 @@ export function backfillIntendedGroups2015(state) {
   for (const m of played) {
     const ids2015 = (m.selectedPlayerIds || []).filter((id) => {
       const pl = state.players.find((p) => p.id === id);
-      return pl?.birthYear === 2015;
+      return birthYearNum(pl) === 2015;
     });
     if (!m.intendedGroup2015 && ids2015.length) {
       m.intendedGroup2015 = inferIntendedGroup2015(g, ids2015);
@@ -284,7 +290,7 @@ export function fill2015Lineup(state, seedIds, rng) {
   const chosen = [...new Set(seedIds)].filter(Boolean);
   for (const id of chosen) {
     const pl = state.players.find((p) => p.id === id);
-    if (!pl || pl.birthYear !== 2015 || !isPlayerAvailable(pl)) throw new Error("invalid_2015_pick");
+    if (!pl || birthYearNum(pl) !== 2015 || !isPlayerAvailable(pl)) throw new Error("invalid_2015_pick");
   }
   if (chosen.length > MAX_2015_ON_FIELD) throw new Error("max_2015_exceeded");
 
@@ -292,7 +298,7 @@ export function fill2015Lineup(state, seedIds, rng) {
   const prev2015 = getLastPlayed2015Ids(state.matches, state.players);
   while (out.length < MAX_2015_ON_FIELD) {
     const pool = state.players.filter(
-      (p) => p.birthYear === 2015 && isPlayerAvailable(p) && !out.includes(p.id)
+      (p) => birthYearNum(p) === 2015 && isPlayerAvailable(p) && !out.includes(p.id)
     );
     if (!pool.length) throw new Error("cannot_field_three_2015");
     const withTie = attachRandomTieKeys(pool, rng);
@@ -317,7 +323,7 @@ export function fill2016Lineup(state, seedIds, targetCount, rng) {
   const chosen = [...new Set(seedIds)].filter(Boolean);
   for (const id of chosen) {
     const pl = state.players.find((p) => p.id === id);
-    if (!pl || pl.birthYear !== 2016 || !isPlayerAvailable(pl)) throw new Error("invalid_2016_pick");
+    if (!pl || birthYearNum(pl) !== 2016 || !isPlayerAvailable(pl)) throw new Error("invalid_2016_pick");
   }
   if (chosen.length > targetCount) throw new Error("max_2016_exceeded");
 
@@ -325,7 +331,7 @@ export function fill2016Lineup(state, seedIds, targetCount, rng) {
   const prev2016 = getLastPlayed2016Ids(state.matches, state.players);
   while (out.length < targetCount) {
     const pool = state.players.filter(
-      (p) => p.birthYear === 2016 && isPlayerAvailable(p) && !out.includes(p.id),
+      (p) => birthYearNum(p) === 2016 && isPlayerAvailable(p) && !out.includes(p.id),
     );
     if (!pool.length) throw new Error("cannot_field_2016_assist");
     const withTie = attachRandomTieKeys(pool, rng);
@@ -358,7 +364,7 @@ function randomPickIds(ids, count, rng) {
  * - Därefter minst totala matcher, sedan slump vid exakt lika.
  */
 function pickNext2016AssistIds(state, nAssist, rng) {
-  const eligible = state.players.filter((p) => p.birthYear === 2016 && isPlayerAvailable(p));
+  const eligible = state.players.filter((p) => birthYearNum(p) === 2016 && isPlayerAvailable(p));
   if (eligible.length < nAssist) throw new Error("cannot_field_2016_assist");
 
   const assistCount = new Map();
@@ -372,7 +378,7 @@ function pickNext2016AssistIds(state, nAssist, rng) {
     const m = playedAssist[i];
     for (const id of m.selectedPlayerIds || []) {
       const pl = state.players.find((p) => p.id === id);
-      if (pl?.birthYear !== 2016) continue;
+      if (birthYearNum(pl) !== 2016) continue;
       assistCount.set(id, (assistCount.get(id) || 0) + 1);
       lastAssistOrder.set(id, i);
     }
@@ -398,7 +404,7 @@ export function validateOverride2016(state, overrideIds, exactCount) {
   if (exactCount != null && uniq.length !== exactCount) throw new Error("override_2016_wrong_count");
   for (const id of uniq) {
     const pl = state.players.find((p) => p.id === id);
-    if (!pl || pl.birthYear !== 2016) throw new Error("override_invalid_2016");
+    if (!pl || birthYearNum(pl) !== 2016) throw new Error("override_invalid_2016");
     if (!isPlayerAvailable(pl)) throw new Error("player_unavailable");
   }
   return uniq;
@@ -410,7 +416,7 @@ export function validateOverride2015(state, overrideIds, max = MAX_2015_ON_FIELD
   if (uniq.length > max) throw new Error("override_too_many_2015");
   for (const id of uniq) {
     const pl = state.players.find((p) => p.id === id);
-    if (!pl || pl.birthYear !== 2015) throw new Error("override_invalid_2015");
+    if (!pl || birthYearNum(pl) !== 2015) throw new Error("override_invalid_2015");
     if (!isPlayerAvailable(pl)) throw new Error("player_unavailable");
   }
   return uniq;
@@ -420,7 +426,7 @@ export function validateOverride2015(state, overrideIds, max = MAX_2015_ON_FIELD
 export function p11Assist2016Count(match, state) {
   const raw = Math.floor(Number(match?.fixture?.p11Assist2016 ?? 0));
   if (!Number.isFinite(raw) || raw < 0) return 0;
-  const cap = state.players.filter((p) => p.birthYear === 2016 && isPlayerAvailable(p)).length;
+  const cap = state.players.filter((p) => birthYearNum(p) === 2016 && isPlayerAvailable(p)).length;
   return Math.min(raw, cap);
 }
 
@@ -439,7 +445,7 @@ export function stripLegacyP10SquadsIfNeeded(state) {
     if (!ids.length) continue;
     const has2015 = ids.some((id) => {
       const pl = state.players.find((p) => p.id === id);
-      return pl?.birthYear === 2015;
+      return birthYearNum(pl) === 2015;
     });
     if (!has2015) {
       m.selectedPlayerIds = [];
@@ -466,7 +472,7 @@ export function matchSquadMode(match) {
 
 function sortedAvailableIdsByYear(state, year) {
   return state.players
-    .filter((p) => p.birthYear === year && isPlayerAvailable(p))
+    .filter((p) => birthYearNum(p) === year && isPlayerAvailable(p))
     .sort((a, b) => a.name.localeCompare(b.name, "sv"))
     .map((p) => p.id);
 }
@@ -616,8 +622,8 @@ export function simulateFullSeason(state) {
       match: m.number,
       group: m.intendedGroup2015,
       group2016: m.intendedGroup2016,
-      selected2015: m.selectedPlayerIds.filter((id) => clone.players.find((p) => p.id === id)?.birthYear === 2015),
-      selected2016: m.selectedPlayerIds.filter((id) => clone.players.find((p) => p.id === id)?.birthYear === 2016),
+      selected2015: m.selectedPlayerIds.filter((id) => birthYearNum(clone.players.find((p) => p.id === id)) === 2015),
+      selected2016: m.selectedPlayerIds.filter((id) => birthYearNum(clone.players.find((p) => p.id === id)) === 2016),
     });
   }
 
@@ -633,8 +639,8 @@ export function simulateFullSeason(state) {
 }
 
 export function validateSeasonDistribution(players, matchCount = 13, matches = null) {
-  const p15 = players.filter((p) => p.birthYear === 2015);
-  const p16 = players.filter((p) => p.birthYear === 2016);
+  const p15 = players.filter((p) => birthYearNum(p) === 2015);
+  const p16 = players.filter((p) => birthYearNum(p) === 2016);
   const n15 = p15.length;
   const n16 = p16.length;
   const c15 = p15.map((p) => p.matchesPlayed);

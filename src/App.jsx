@@ -4,7 +4,7 @@ import { useRegisterSW } from "virtual:pwa-register/react";
 import { Button } from "@/components/ui/button";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { normalizeClubName, resolveTeamLogoUrl, teamInitials } from "@/lib/teamLogos";
-import { matchSquadMode, p11Assist2016Count, compareMatchesChronologically } from "../selection.mjs";
+import { birthYearNum, matchSquadMode, p11Assist2016Count, compareMatchesChronologically } from "../selection.mjs";
 
 const PROD_API_FALLBACK = "https://ifkolme-production.up.railway.app";
 const configuredApiBase = import.meta.env.VITE_API_BASE_URL?.trim();
@@ -1648,8 +1648,8 @@ function MatchCard({
   const plannedBenchPlayers = benchPlayers.filter((p) => plannedBenchByInId.has(p.id));
   const unassignedBenchPlayers = benchPlayers.filter((p) => !plannedBenchByInId.has(p.id));
 
-  const names2015 = selectedRowsAll.filter((p) => p.birthYear === 2015).map((p) => p.name);
-  const names2016 = selectedRowsAll.filter((p) => p.birthYear === 2016).map((p) => p.name);
+  const names2015 = selectedRowsAll.filter((p) => birthYearNum(p) === 2015).map((p) => p.name);
+  const names2016 = selectedRowsAll.filter((p) => birthYearNum(p) === 2016).map((p) => p.name);
 
   const copyTeam = async () => {
     const lines = [];
@@ -2952,11 +2952,11 @@ export default function App() {
   }, [matchesCalendar, visibleCalendarMonth]);
 
   const players2015 = useMemo(
-    () => (state?.players ? state.players.filter((p) => p.birthYear === 2015) : []),
+    () => (state?.players ? state.players.filter((p) => birthYearNum(p) === 2015) : []),
     [state?.players]
   );
   const players2016 = useMemo(
-    () => (state?.players ? state.players.filter((p) => p.birthYear === 2016) : []),
+    () => (state?.players ? state.players.filter((p) => birthYearNum(p) === 2016) : []),
     [state?.players]
   );
   const sortedPlayersTable = useMemo(() => {
@@ -2967,7 +2967,7 @@ export default function App() {
       if (key === "jerseyNumber") return Number(p.jerseyNumber || 0);
       if (key === "preferredPosition") return p.preferredPosition || "";
       if (key === "birthYear") return Number(p.birthYear || 0);
-      if (key === "group") return p.birthYear === 2015 ? groupLetterFor2015Player(p.id, state?.groups2015) || "" : "";
+      if (key === "group") return birthYearNum(p) === 2015 ? groupLetterFor2015Player(p.id, state?.groups2015) || "" : "";
       if (key === "matchesPlayed") return Number(p.matchesPlayed || 0);
       if (key === "lastPlayedMatchNumber") return Number(p.lastPlayedMatchNumber || 0);
       if (key === "available") return p.available === false ? 0 : 1;
@@ -3556,7 +3556,7 @@ export default function App() {
                   </thead>
                   <tbody>
                     {sortedPlayersTable.map((p) => {
-                        const gLet = p.birthYear === 2015 ? groupLetterFor2015Player(p.id, state.groups2015) : null;
+                        const gLet = birthYearNum(p) === 2015 ? groupLetterFor2015Player(p.id, state.groups2015) : null;
                         if (editingId === p.id) {
                           return (
                             <tr key={p.id} className="players-table__edit">
@@ -3652,7 +3652,7 @@ export default function App() {
                             <td data-label="Nr">{p.jerseyNumber || "—"}</td>
                             <td data-label="Position">{p.preferredPosition || "—"}</td>
                             <td data-label="År">{p.birthYear}</td>
-                            <td data-label="Grupp">{p.birthYear === 2015 ? (gLet ? gLet : "—") : "—"}</td>
+                            <td data-label="Grupp">{birthYearNum(p) === 2015 ? (gLet ? gLet : "—") : "—"}</td>
                             <td data-label="Matcher">{p.matchesPlayed}</td>
                             <td data-label="Senast">{p.lastPlayedMatchNumber != null ? p.lastPlayedMatchNumber : "—"}</td>
                             <td data-label="Status">

@@ -5,6 +5,7 @@ import path from "path";
 import { fileURLToPath } from "url";
 import { Pool } from "pg";
 import {
+  birthYearNum,
   repairGroups2015IfNeeded,
   repairGroups2016IfNeeded,
   validateGroups2015,
@@ -208,7 +209,7 @@ function syncFixturesFromIcs(state, fixtures) {
 
 function expectedAvailableIdsByYear(state, year) {
   return state.players
-    .filter((p) => p.birthYear === year && isPlayerAvailable(p))
+    .filter((p) => birthYearNum(p) === year && isPlayerAvailable(p))
     .map((p) => p.id)
     .sort();
 }
@@ -582,6 +583,13 @@ function ensureMeta(data) {
 function migrateAvailability(data) {
   let dirty = false;
   for (const p of data.players) {
+    if (p.birthYear !== undefined && p.birthYear !== null) {
+      const y = Number(p.birthYear);
+      if (Number.isFinite(y) && typeof p.birthYear !== "number") {
+        p.birthYear = y;
+        dirty = true;
+      }
+    }
     if (p.available === undefined) {
       p.available = true;
       dirty = true;
@@ -1495,17 +1503,17 @@ app.post("/api/matches/:id/complete", async (req, res) => {
 
   const count2015 = match.selectedPlayerIds.filter((id) => {
     const pl = state.players.find((p) => p.id === id);
-    return pl?.birthYear === 2015;
+    return birthYearNum(pl) === 2015;
   }).length;
   const count2016 = match.selectedPlayerIds.filter((id) => {
     const pl = state.players.find((p) => p.id === id);
-    return pl?.birthYear === 2016;
+    return birthYearNum(pl) === 2016;
   }).length;
   const mode = matchSquadMode(match);
   if (mode === "p11Mixed") {
     const nAssist = p11Assist2016Count(match, state);
     const want2015 = expectedAvailableIdsByYear(state, 2015);
-    const sel2015 = match.selectedPlayerIds.filter((id) => state.players.find((p) => p.id === id)?.birthYear === 2015);
+    const sel2015 = match.selectedPlayerIds.filter((id) => birthYearNum(state.players.find((p) => p.id === id)) === 2015);
     if (!sameSortedIdSets(sel2015, want2015)) {
       return res.status(400).json({
         error: "Alla tillgängliga födda 2015 krävs. Välj lag på nytt om tillgänglighet ändrats.",
@@ -1531,7 +1539,7 @@ app.post("/api/matches/:id/complete", async (req, res) => {
       return res.status(400).json({ error: "Exakt tre spelare födda 2015 krävs för att genomföra matchen." });
     }
     const want2016 = expectedAvailableIdsByYear(state, 2016);
-    const sel2016 = match.selectedPlayerIds.filter((id) => state.players.find((p) => p.id === id)?.birthYear === 2016);
+    const sel2016 = match.selectedPlayerIds.filter((id) => birthYearNum(state.players.find((p) => p.id === id)) === 2016);
     if (!sameSortedIdSets(sel2016, want2016)) {
       return res.status(400).json({
         error: "Alla tillgängliga födda 2016 och exakt tre födda 2015 krävs. Välj lag på nytt om tillgänglighet ändrats.",
@@ -1542,13 +1550,13 @@ app.post("/api/matches/:id/complete", async (req, res) => {
   repairGroups2015IfNeeded(state);
   repairGroups2016IfNeeded(state);
   if (!match.intendedGroup2015) {
-    const ids2015 = match.selectedPlayerIds.filter((id) => state.players.find((p) => p.id === id)?.birthYear === 2015);
+    const ids2015 = match.selectedPlayerIds.filter((id) => birthYearNum(state.players.find((p) => p.id === id)) === 2015);
     if (ids2015.length > 0) {
       match.intendedGroup2015 = inferIntendedGroup2015(state.groups2015, ids2015);
     }
   }
   if (mode === "p11Mixed" && !match.intendedGroup2016) {
-    const ids2016 = match.selectedPlayerIds.filter((id) => state.players.find((p) => p.id === id)?.birthYear === 2016);
+    const ids2016 = match.selectedPlayerIds.filter((id) => birthYearNum(state.players.find((p) => p.id === id)) === 2016);
     if (ids2016.length) {
       match.intendedGroup2016 = inferIntendedGroup2016(state.groups2016, ids2016);
     }
