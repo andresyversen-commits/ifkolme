@@ -1189,10 +1189,18 @@ function Groups2015Editor({ groups2015, players2015, load, setErr, revision }) {
       .sort((a, b) => a.name.localeCompare(b.name, "sv"));
 
   if (players2015.length !== 9) {
+    const n = players2015.length;
     return (
-      <p className="empty-hint">
-        Exakt nio spelare födda 2015 krävs för att hantera grupperna A, B och C (tre per grupp).
-      </p>
+      <div className="callout callout--muted" role="status">
+        <p style={{ margin: 0, fontWeight: 600 }}>2015-grupperna visas när spelarlistan stämmer</p>
+        <p className="text-muted" style={{ margin: "8px 0 0" }}>
+          För att redigera rotationen A/B/C behövs <strong>exakt nio</strong> spelare födda 2015 (tre per grupp).
+          Antal födda 2015 just nu: <strong>{n}</strong>.
+        </p>
+        <p className="text-muted" style={{ margin: "8px 0 0", fontSize: 14 }}>
+          Gå till fliken <strong>Spelare</strong>, lägg till eller ta bort spelare med födelseår 2015 tills antalet är nio — då visas gruppeditorn här.
+        </p>
+      </div>
     );
   }
 
@@ -3413,8 +3421,9 @@ export default function App() {
 
           {rotationView && rotationView.groupsValid === false && (
             <div className="callout callout--muted" role="status">
-              <strong>Ogiltiga 2015-grupper.</strong> Välj fliken <strong>Grupper</strong> och fördela exakt tre
-              spelare i A, B och C, sedan spara — eller åtgärda antalet födda 2015.
+              <strong>Ogiltiga 2015-grupper.</strong> Välj fliken <strong>Grupper</strong>: om det finns{" "}
+              <strong>exakt nio</strong> spelare födda 2015 kan du fördela tre i A, B och C och spara. Annars
+              justerar du först antalet 2015-spelare under <strong>Spelare</strong>.
             </div>
           )}
           {rotationView && rotationView.groups2016Valid === false && (
