@@ -938,6 +938,21 @@ function seasonYear() {
   return new Date().getFullYear();
 }
 
+/** Nästa match i kalenderordning som inte är spelad (fokus efter genomförd match). */
+function pickNextUnplayedMatchId(matches, completedId) {
+  if (!Array.isArray(matches) || matches.length === 0) return null;
+  const ordered = [...matches].sort(compareMatchesChronologically);
+  const idx = ordered.findIndex((m) => m.id === completedId);
+  const from = idx >= 0 ? idx + 1 : 0;
+  for (let i = from; i < ordered.length; i++) {
+    if (ordered[i].status !== "played") return ordered[i].id;
+  }
+  for (let i = 0; i < from; i++) {
+    if (ordered[i].status !== "played") return ordered[i].id;
+  }
+  return null;
+}
+
 function playerAge(birthYear) {
   return seasonYear() - birthYear;
 }
@@ -1446,6 +1461,7 @@ function MatchCard({
   groupsValid,
   coachNames = [],
   onCopied,
+  onMatchCompleted,
   cardTitle = "Match",
   displayNumber,
   getStoredTeamLogo,
@@ -2588,7 +2604,8 @@ function MatchCard({
                         body: buildMatchReportPayload(),
                       });
                       setMatchDialog(null);
-                      await load();
+                      const nextState = await load({ silent: true });
+                      onMatchCompleted?.(m.id, nextState);
                     } catch (x) {
                       setErr(x.message);
                     } finally {
@@ -2650,6 +2667,8 @@ export default function App() {
   const [playerSubTab, setPlayerSubTab] = useState("players");
   /** Underflikar inom Matcher: P10 / P11 */
   const [activeMatchId, setActiveMatchId] = useState(null);
+  /** Matcher-flik: lista kommande, spelade eller alla (med datum i kalender). */
+  const [matchListScope, setMatchListScope] = useState("upcoming");
   const [showMatchCalendar, setShowMatchCalendar] = useState(false);
   const [playersSort, setPlayersSort] = useState({ key: "birthYear", dir: "asc" });
   const [importing, setImporting] = useState(false);
@@ -2764,6 +2783,9 @@ export default function App() {
         }
         if (parsedUi?.overviewAge) setOverviewAge(parsedUi.overviewAge);
         if (parsedUi?.activeMatchId) setActiveMatchId(parsedUi.activeMatchId);
+        if (parsedUi?.matchListScope && ["upcoming", "played", "all"].includes(parsedUi.matchListScope)) {
+          setMatchListScope(parsedUi.matchListScope);
+        }
         if (parsedUi?.icsUrl) setIcsUrl(parsedUi.icsUrl);
       }
     } catch {
@@ -2875,12 +2897,12 @@ export default function App() {
     try {
       localStorage.setItem(
         LS_UI_KEY,
-        JSON.stringify({ playerSubTab, overviewBirth, overviewAge, activeMatchId, icsUrl }),
+        JSON.stringify({ playerSubTab, overviewBirth, overviewAge, activeMatchId, matchListScope, icsUrl }),
       );
     } catch {
       // Ignorera localStorage-fel.
     }
-  }, [playerSubTab, overviewBirth, overviewAge, activeMatchId, icsUrl]);
+  }, [playerSubTab, overviewBirth, overviewAge, activeMatchId, matchListScope, icsUrl]);
 
   useEffect(() => {
     const incoming = Array.isArray(state?.coaches)
@@ -2960,6 +2982,25 @@ export default function App() {
     const arr = (state?.matches || []).filter((m) => parseIsoDateLocal(m.fixture?.date));
     return [...arr].sort(compareMatchesChronologically);
   }, [state?.matches]);
+
+  const matchesForScheduleView = useMemo(() => {
+    let arr = matchesCalendar;
+    if (matchListScope === "upcoming") arr = arr.filter((m) => m.status !== "played");
+    else if (matchListScope === "played") arr = arr.filter((m) => m.status === "played");
+    return [...arr].sort(compareMatchesChronologically);
+  }, [matchesCalendar, matchListScope]);
+
+  const handleMatchCompleted = useCallback((completedId, nextState) => {
+    setMatchListScope("upcoming");
+    const matches = nextState?.matches || [];
+    const nextId = pickNextUnplayedMatchId(matches, completedId);
+    if (nextId) {
+      setActiveMatchId(nextId);
+      const nm = matches.find((x) => x.id === nextId);
+      const dt = nm?.fixture?.date ? parseIsoDateLocal(nm.fixture.date) : null;
+      if (dt) setCalendarMonthKey(monthKeyOf(new Date(dt.getFullYear(), dt.getMonth(), 1)));
+    }
+  }, []);
   const calendarMonthKeys = useMemo(() => {
     const keys = new Set();
     const now = new Date();
@@ -2991,7 +3032,7 @@ export default function App() {
   }, [calendarMonthKey]);
   const calendarMonthView = useMemo(() => {
     const { year, month } = visibleCalendarMonth;
-    const monthMatches = matchesCalendar.filter((m) => {
+    const monthMatches = matchesForScheduleView.filter((m) => {
       const dt = parseIsoDateLocal(m.fixture?.date);
       return dt && dt.getFullYear() === year && dt.getMonth() === month;
     });
@@ -3017,18 +3058,18 @@ export default function App() {
       matchesByDay,
       cells,
     };
-  }, [matchesCalendar, visibleCalendarMonth]);
+  }, [matchesForScheduleView, visibleCalendarMonth]);
 
   /** Kronologisk liste for mobil (månedsrute er for smal). */
   const calendarMonthAgenda = useMemo(() => {
     const { year, month } = visibleCalendarMonth;
-    return matchesCalendar
+    return matchesForScheduleView
       .filter((m) => {
         const dt = parseIsoDateLocal(m.fixture?.date);
         return dt && dt.getFullYear() === year && dt.getMonth() === month;
       })
       .sort(compareMatchesChronologically);
-  }, [matchesCalendar, visibleCalendarMonth]);
+  }, [matchesForScheduleView, visibleCalendarMonth]);
 
   const players2015 = useMemo(
     () => (state?.players ? state.players.filter((p) => birthYearNum(p) === 2015) : []),
@@ -3045,7 +3086,7 @@ export default function App() {
       if (key === "name") return p.name || "";
       if (key === "jerseyNumber") return Number(p.jerseyNumber || 0);
       if (key === "preferredPosition") return p.preferredPosition || "";
-      if (key === "birthYear") return Number(p.birthYear || 0);
+      if (key === "birthYear") return birthYearNum(p) || 0;
       if (key === "group") return birthYearNum(p) === 2015 ? groupLetterFor2015Player(p.id, state?.groups2015) || "" : "";
       if (key === "matchesPlayed") return Number(p.matchesPlayed || 0);
       if (key === "lastPlayedMatchNumber") return Number(p.lastPlayedMatchNumber || 0);
@@ -3139,8 +3180,14 @@ export default function App() {
   );
 
   useEffect(() => {
-    if (!matchesCalendar.length) return;
-    if (activeMatchId && matchesCalendar.some((m) => m.id === activeMatchId)) return;
+    const pool = state?.matches || [];
+    if (!pool.length) return;
+    if (activeMatchId && pool.some((m) => m.id === activeMatchId)) return;
+    if (!matchesCalendar.length) {
+      const pick = [...pool].sort(compareMatchesChronologically)[0];
+      if (pick?.id) setActiveMatchId(pick.id);
+      return;
+    }
     const firstInVisibleMonth = matchesCalendar.find((m) => {
       const dt = parseIsoDateLocal(m.fixture?.date);
       return (
@@ -3149,11 +3196,19 @@ export default function App() {
         dt.getMonth() === visibleCalendarMonth.month
       );
     });
-    setActiveMatchId((firstInVisibleMonth || matchesCalendar[0]).id);
-  }, [matchesCalendar, activeMatchId, visibleCalendarMonth.year, visibleCalendarMonth.month]);
+    const pick = firstInVisibleMonth || matchesCalendar[0];
+    if (pick?.id) setActiveMatchId(pick.id);
+  }, [state?.matches, matchesCalendar, activeMatchId, visibleCalendarMonth.year, visibleCalendarMonth.month]);
+
+  useEffect(() => {
+    if (!activeMatchId || !matchesForScheduleView.length) return;
+    if (matchesForScheduleView.some((m) => m.id === activeMatchId)) return;
+    setActiveMatchId(matchesForScheduleView[0].id);
+  }, [matchListScope, matchesForScheduleView, activeMatchId]);
+
   const activeMatch = useMemo(
-    () => matchesCalendar.find((m) => m.id === activeMatchId) || null,
-    [matchesCalendar, activeMatchId],
+    () => (state?.matches || []).find((x) => x.id === activeMatchId) || null,
+    [state?.matches, activeMatchId],
   );
   const matchBoardItems = useMemo(
     () =>
@@ -4036,7 +4091,33 @@ export default function App() {
           )}
 
           <div className="matches-layout">
-            <div className="matches-layout__toolbar">
+            <div className="matches-layout__toolbar matches-layout__toolbar--wrap">
+              <div className="segmented segmented--filter" role="group" aria-label="Vilka matcher som listas">
+                <button
+                  type="button"
+                  className="segmented__btn"
+                  aria-selected={matchListScope === "upcoming"}
+                  onClick={() => setMatchListScope("upcoming")}
+                >
+                  Kommande
+                </button>
+                <button
+                  type="button"
+                  className="segmented__btn"
+                  aria-selected={matchListScope === "played"}
+                  onClick={() => setMatchListScope("played")}
+                >
+                  Spelade
+                </button>
+                <button
+                  type="button"
+                  className="segmented__btn"
+                  aria-selected={matchListScope === "all"}
+                  onClick={() => setMatchListScope("all")}
+                >
+                  Alla
+                </button>
+              </div>
               <button
                 type="button"
                 className="btn btn--secondary btn--sm"
@@ -4077,7 +4158,13 @@ export default function App() {
                 <section className="calendar-month">
                   <ul className="calendar-month__agenda" aria-label="Matcher denna månad">
                     {calendarMonthAgenda.length === 0 ? (
-                      <li className="calendar-agenda__empty">Inga matcher den här månaden.</li>
+                      <li className="calendar-agenda__empty">
+                        {matchListScope === "upcoming"
+                          ? "Inga kommande matcher den här månaden."
+                          : matchListScope === "played"
+                            ? "Inga spelade matcher den här månaden."
+                            : "Inga matcher den här månaden."}
+                      </li>
                     ) : (
                       calendarMonthAgenda.map((m) => {
                         const st = calendarStatus(m);
@@ -4194,6 +4281,7 @@ export default function App() {
                     groupsValid={matchGroupsValid}
                     coachNames={coachNames}
                     onCopied={setOkMsg}
+                    onMatchCompleted={handleMatchCompleted}
                     cardTitle="Match"
                     displayNumber={activeMatch?.number}
                     getStoredTeamLogo={getStoredTeamLogo}
@@ -4246,8 +4334,8 @@ export default function App() {
               ))}
             </div>
             <p className="text-muted" style={{ margin: "8px 0 0", fontSize: 13 }}>
-              Alla P10 visar spelare födda 2015 och 2016. Hela truppen inkluderar även 2014 m.m. Åldersfiltret nedan
-              kan dölja rader om det inte är &quot;Alla&quot;.
+              Alla P10 = födda 2015 och 2016. Väljer du bara 2015 eller 2016 och sedan{" "}
+              <strong>Alla åldrar</strong> byts vyn tillbaka till alla P10. Hela truppen inkluderar även 2014 m.m.
             </p>
           </div>
 
@@ -4258,9 +4346,12 @@ export default function App() {
                 type="button"
                 className="segmented__btn"
                 aria-selected={overviewAge === "all"}
-                onClick={() => setOverviewAge("all")}
+                onClick={() => {
+                  setOverviewAge("all");
+                  setOverviewBirth((b) => (b === "2015" || b === "2016" ? "p10" : b));
+                }}
               >
-                Alla
+                Alla åldrar
               </button>
               {uniqueAges.map((a) => (
                 <button

@@ -1939,6 +1939,13 @@ body {
   margin-bottom: 2px;
 }
 
+.matches-layout__toolbar--wrap {
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 10px 12px;
+  justify-content: space-between;
+}
+
 .match-board {
   display: grid;
   gap: 8px;
