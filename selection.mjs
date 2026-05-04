@@ -80,7 +80,7 @@ export function playerCountsAsPlayedInMatchForTeamScope(m, playerId, state, team
 }
 
 /**
- * Deltakelse per kamp (spillerhistorikk), uten lag-filter — brukes i UI for alle matcher.
+ * Deltagande per match (spelarhistorik), utan lagfilter — används i gränssnittet för alla matcher.
  */
 export function playerMatchParticipationKind(match, playerId, state) {
   const pl = state.players.find((x) => x.id === playerId);

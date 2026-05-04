@@ -213,7 +213,7 @@ body {
     padding-bottom: calc(84px + env(safe-area-inset-bottom));
   }
 
-  /* Mindre tomt nederst når fanemenyen er skjult (scroll ned) */
+  /* Mindre tomt nederst när flikmenyn döljs (scroll ned) */
   .app.app--bottom-nav-hidden {
     padding-bottom: max(20px, env(safe-area-inset-bottom));
   }
@@ -230,14 +230,14 @@ body {
     border-radius: 0;
     border: none;
     border-top: 1px solid color-mix(in oklab, var(--foreground) 14%, var(--border));
-    /* Solid bar — glass blur gjorde den nesten usynlig mot gradientbakgrunn */
+    /* Solid fält — glasblur gjorde den nästan osynlig mot gradientbakgrunden */
     background: color-mix(in oklab, var(--bg-elevated) 98%, var(--foreground));
     backdrop-filter: none;
     -webkit-backdrop-filter: none;
     box-shadow:
       0 -1px 0 rgb(255 255 255 / 0.65) inset,
       0 -10px 28px rgb(15 23 42 / 0.12);
-    /* Ekstra padding under tappene + safe area (hjem-indikator) */
+    /* Extra padding under flikarna + safe area (hemsknapp/indikator) */
     padding-top: 6px;
     padding-bottom: max(10px, env(safe-area-inset-bottom, 0px));
     transition: transform 0.24s cubic-bezier(0.4, 0, 0.2, 1), box-shadow 0.24s ease;
@@ -767,7 +767,7 @@ body {
   font-size: 17px;
 }
 
-/* Statistikk: fire kolonner (uten «siste kamp») */
+/* Statistik: fyra kolumner (utan «senaste match») */
 .stat-list.stat-list--overview > .stat-head {
   display: grid;
   grid-template-columns:

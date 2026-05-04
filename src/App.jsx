@@ -53,7 +53,7 @@ async function api(path, options = {}) {
 const TABS = [
   { id: "players", label: "Spelargrupp" },
   { id: "matches", label: "Matcher" },
-  { id: "overview", label: "Statistikk" },
+  { id: "overview", label: "Statistik" },
   { id: "test", label: "Test" },
   { id: "settings", label: "Inställningar" },
 ];
@@ -1000,20 +1000,20 @@ function fixtureOpponentLabel(m) {
   return away || home;
 }
 
-function participationKindLabelNo(kind) {
+function participationKindLabelSv(kind) {
   switch (kind) {
     case "played":
-      return "Spilte";
+      return "Spelade";
     case "declined":
-      return "Takket nei";
+      return "Tackade nej";
     case "not_in_squad":
-      return "Ikke i tropp";
+      return "Inte i truppen";
     case "squad_pending":
-      return "Valgt til tropp";
+      return "Vald i truppen";
     case "squad_unavailable_played":
-      return "Utilgjengelig (i tropp)";
+      return "Otillgänglig (i trupp)";
     case "squad_not_counted":
-      return "I tropp, telles ikke";
+      return "I trupp, räknas inte";
     default:
       return "—";
   }
@@ -2052,7 +2052,7 @@ function MatchCard({
           ) : (
             <div className="lineup-layout">
               <div className="lineup-layout__controls">
-                <div className="lineup-dnd-help">Velg posisjon for hver spiller.</div>
+                <div className="lineup-dnd-help">Välj position för varje spelare.</div>
                 <div className="lineup-player-grid">
                   {selectedRows.map((p) => (
                     <div key={`pos-${p.id}`} className="field">
@@ -2727,9 +2727,9 @@ export default function App() {
   const [editPreferredPosition, setEditPreferredPosition] = useState("");
   /** Statistik: vilket lags matcher som räknas (P10 / P11 / båda). */
   const [overviewTeam, setOverviewTeam] = useState("p10");
-  /** Statistikk: spillerfilter — «2015» betyr født 2014 eller 2015 (éi flis). */
+  /** Statistik: spelarfilter — «2015» betyder födda 2014 eller 2015 (en gemensam flik). */
   const [overviewPlayerYear, setOverviewPlayerYear] = useState("all");
-  /** Statistikk: spiller som viser kampliste-modal */
+  /** Statistik: spelare vars matchlista visas i modal */
   const [overviewHistoryPlayerId, setOverviewHistoryPlayerId] = useState(null);
   /** Underflikar inom Spelargrupp: spelarlista, grupper eller tränare */
   const [playerSubTab, setPlayerSubTab] = useState("players");
@@ -4431,35 +4431,35 @@ export default function App() {
 
       {tab === "overview" && (
         <section className="panel" role="tabpanel" id="panel-overview" aria-labelledby="tab-overview">
-          <h2 className="panel__title">Statistikk</h2>
+          <h2 className="panel__title">Statistik</h2>
 
           <p className="overview-meta">
             <span>
-              Gjennomførte kamper
+              Genomförda matcher
               {overviewTeam === "both"
-                ? " (begge lag)"
+                ? " (båda lagen)"
                 : overviewTeam === "p11"
                   ? " (P 11)"
                   : " (P 10)"}
               : <strong>{overviewScopeStats.matchesPlayed}</strong> / {overviewScopeStats.matchesTotal}
             </span>
             <span>
-              Viser <strong>{playersOverview.length}</strong> av <strong>{playersAfterBirthFilter.length}</strong> spillere
+              Visar <strong>{playersOverview.length}</strong> av <strong>{playersAfterBirthFilter.length}</strong> spelare
               {overviewPlayerYear === "2015"
-                ? " født 2014 eller 2015"
+                ? " födda 2014 eller 2015"
                 : overviewPlayerYear === "2016"
-                  ? " født 2016"
+                  ? " födda 2016"
                   : ""}
             </span>
           </p>
 
           <div className="filter-block">
-            <span className="filter-block__label">Lag / kamper</span>
-            <div className="segmented segmented--filter" role="group" aria-label="Hvilket lags kamper som telles">
+            <span className="filter-block__label">Lag / matcher</span>
+            <div className="segmented segmented--filter" role="group" aria-label="Vilket lags matcher som räknas">
               {[
                 { id: "p10", label: "P 10" },
                 { id: "p11", label: "P 11" },
-                { id: "both", label: "Begge lag" },
+                { id: "both", label: "Båda lagen" },
               ].map((o) => (
                 <button
                   key={o.id}
@@ -4473,14 +4473,18 @@ export default function App() {
               ))}
             </div>
             <p className="text-muted" style={{ margin: "8px 0 0", fontSize: 13 }}>
-              Tallene gjelder valgt lag. <strong>Begge lag</strong> summerer P 10- og P 11-kamper (født 2014 telles
-              bare som deltaker i P 11, samme regler som i troppen).
+              Siffrorna gäller valt lag. <strong>Båda lagen</strong> summerar P 10- och P 11-matcher (födda 2014 räknas
+              bara som deltagare i P 11, samma regler som i truppen).
             </p>
           </div>
 
           <div className="filter-block">
-            <span className="filter-block__label">Hvilke spillere som vises</span>
-            <div className="segmented segmented--filter segmented--scroll" role="group" aria-label="Filtrer spillere etter fødselsår">
+            <span className="filter-block__label">Vilka spelare som visas</span>
+            <div
+              className="segmented segmented--filter segmented--scroll"
+              role="group"
+              aria-label="Filtrera spelare efter födelseår"
+            >
               {[
                 { id: "all", label: "Alle" },
                 { id: "2015", label: "2014–2015" },
@@ -4498,24 +4502,24 @@ export default function App() {
               ))}
             </div>
             <p className="text-muted" style={{ margin: "8px 0 0", fontSize: 13 }}>
-              <strong>2014–2015</strong> viser alle født i 2014 og 2015 sammen (ingen egen knapp for bare 2014).
+              <strong>2014–2015</strong> visar alla födda 2014 och 2015 tillsammans (ingen egen knapp för bara 2014).
             </p>
           </div>
 
           <p className="text-muted" style={{ margin: "0 0 10px", fontSize: 13 }}>
-            Trykk på ein spelar for alle kampar i rekkefølge — du ser om hen spelte, ikkje var med i troppen, eller
-            takka nei.
+            Tryck på en spelare för alla matcher i ordning — du ser om spelaren deltog, inte var med i truppen eller
+            tackade nej.
           </p>
 
           {playersOverview.length === 0 ? (
-            <p className="empty-hint">Ingen spillere samsvarer med filteret.</p>
+            <p className="empty-hint">Inga spelare matchar filtret.</p>
           ) : (
             <div className="stat-list stat-list--overview">
               <div className="stat-head" aria-hidden>
-                <span>Navn</span>
-                <span title="Fødselsår">Født</span>
-                <span title="Gjennomførte kamper der spilleren telles som deltaker (innen valgt lag)">Kamper</span>
-                <span title="Antall ganger spilleren har takket nei til kamp (kamper i valgt lag)">Takket nei</span>
+                <span>Namn</span>
+                <span title="Födelseår">År</span>
+                <span title="Genomförda matcher där spelaren räknas som deltagare (inom valt lag)">Matcher</span>
+                <span title="Antal gånger spelaren tackat nej till match (inom valt lag)">Tackade nej</span>
               </div>
               {playersOverview.map((p) => {
                 const sp = overviewScopeStats.byPlayer.get(p.id);
@@ -4560,32 +4564,32 @@ export default function App() {
                 onMouseDown={(e) => e.stopPropagation()}
               >
                 <h4 className="modal-sheet__title" id="player-history-title">
-                  Kamper — {state.players.find((x) => x.id === overviewHistoryPlayerId)?.name ?? "Spelare"}
+                  Matcher — {state.players.find((x) => x.id === overviewHistoryPlayerId)?.name ?? "Spelare"}
                 </h4>
                 <p className="player-history-modal__hint">
-                  Alle kampar i kalenderrekkefølge for denne spelaren. «Spilte» = telles som deltakar i avvikla kamp
-                  (same reglar som i oversikten). «Valgt til tropp» = kampen er ikkje merka som spelt enno.
+                  Alla matcher i kalenderordning för den här spelaren. «Spelade» = räknas som deltagare i genomförd
+                  match (samma regler som i översikten). «Vald i truppen» = matchen är inte markerad som spelad än.
                 </p>
                 <ul className="player-history-modal__list">
                   {overviewPlayerHistoryRows.map((row) => (
                     <li key={row.match.id} className="player-history-modal__item">
                       <div>
                         <div className="player-history-modal__meta">
-                          Kamp {row.matchNo} · {row.branchLabel}
+                          Match {row.matchNo} · {row.branchLabel}
                         </div>
                         <p className="player-history-modal__line">
                           {row.dateLabel} · {row.opponent}
                         </p>
                       </div>
                       <span className={participationKindStatusClass(row.kind)}>
-                        {participationKindLabelNo(row.kind)}
+                        {participationKindLabelSv(row.kind)}
                       </span>
                     </li>
                   ))}
                 </ul>
                 <div className="modal-sheet__actions">
                   <button type="button" className="btn btn--secondary" onClick={() => setOverviewHistoryPlayerId(null)}>
-                    Lukk
+                    Stäng
                   </button>
                 </div>
               </div>
