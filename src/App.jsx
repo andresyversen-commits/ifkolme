@@ -148,7 +148,7 @@ function normalizeTestLabFormation(input) {
   if (sum === total) return { defenders, midfielders, attackers };
   if (sum > total) {
     let excess = sum - total;
-    // Reduce attackers first, then midfielders, then defenders.
+    // Minska anfallare först, sedan mittfält, sedan försvar.
     const take = (key, n) => {
       const v = { defenders, midfielders, attackers }[key];
       const dec = Math.min(v, n);
@@ -163,7 +163,7 @@ function normalizeTestLabFormation(input) {
     return { defenders, midfielders, attackers };
   }
   let missing = total - sum;
-  // Add attackers first, then midfielders, then defenders.
+  // Lägg till anfallare först, sedan mittfält, sedan försvar.
   const add = (key, n) => {
     const v = { defenders, midfielders, attackers }[key];
     const inc = Math.min(6 - v, n);
