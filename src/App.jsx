@@ -1601,6 +1601,9 @@ function MatchCard({
     setMatchSubTab("squad");
   }, [m.id]);
   useEffect(() => {
+    if (m.status === "played" && matchSubTab === "notes") setMatchSubTab("squad");
+  }, [m.status, matchSubTab, m.id]);
+  useEffect(() => {
     if (coachNames.length && !coachNames.includes(commentName)) {
       setCommentName(coachNames[0]);
     }
@@ -1950,15 +1953,17 @@ function MatchCard({
         >
           Laguppställning
         </button>
-        <button
-          type="button"
-          role="tab"
-          className="segmented__btn"
-          aria-selected={matchSubTab === "notes"}
-          onClick={() => setMatchSubTab("notes")}
-        >
-          Meddelanden
-        </button>
+        {m.status !== "played" ? (
+          <button
+            type="button"
+            role="tab"
+            className="segmented__btn"
+            aria-selected={matchSubTab === "notes"}
+            onClick={() => setMatchSubTab("notes")}
+          >
+            Meddelanden
+          </button>
+        ) : null}
       </div>
 
       {matchSubTab === "squad" && <div className="match-card__body">
@@ -2230,7 +2235,8 @@ function MatchCard({
         <p className="text-muted">Ingen tillgänglig spelare i truppen för laguppställning just nu.</p>
       )}
 
-      {matchSubTab === "notes" && <div className="match-comments" aria-label="Meddelanden">
+      {matchSubTab === "notes" && m.status !== "played" && (
+        <div className="match-comments" aria-label="Meddelanden">
         <h4 className="panel__title" style={{ fontSize: 15, margin: "0 0 8px" }}>
           Meddelanden
         </h4>
@@ -2366,7 +2372,8 @@ function MatchCard({
             ))
           )}
         </div>
-      </div>}
+      </div>
+      )}
 
       {matchSubTab === "squad" && m.status !== "played" && isP11Series && (
         <div style={{ marginBottom: 12 }}>
@@ -3336,7 +3343,7 @@ export default function App() {
   const matchBoardItems = useMemo(
     () =>
       matchesCalendar
-        .filter((m) => (m.comments || []).length > 0)
+        .filter((m) => (m.comments || []).length > 0 && m.status !== "played")
         .map((m) => ({
           id: m.id,
           number: m.number,
@@ -4215,7 +4222,11 @@ export default function App() {
 
           <div className="matches-layout">
             <div className="matches-layout__toolbar matches-layout__toolbar--wrap">
-              <div className="segmented segmented--filter" role="group" aria-label="Vilka matcher som listas">
+              <div
+                className="segmented segmented--filter segmented--scroll"
+                role="group"
+                aria-label="Vilka matcher som listas"
+              >
                 <button
                   type="button"
                   className="segmented__btn"
@@ -4294,7 +4305,7 @@ export default function App() {
                         const branchLabel = (m.branch || "p10") === "p11" ? "P11" : "P10";
                         const opponent = calendarOpponentName(m);
                         const oppLogo = calendarOpponentLogo(m);
-                        const hasUpdate = (m.comments || []).length > 0;
+                        const hasUpdate = (m.comments || []).length > 0 && m.status !== "played";
                         const dt = parseIsoDateLocal(m.fixture?.date);
                         const dayNum = dt ? dt.getDate() : "";
                         const dow = dt
@@ -4355,7 +4366,7 @@ export default function App() {
                                 const branchLabel = (match.branch || "p10") === "p11" ? "P11" : "P10";
                                 const opponent = calendarOpponentName(match);
                                 const oppLogo = calendarOpponentLogo(match);
-                                const hasUpdate = (match.comments || []).length > 0;
+                                const hasUpdate = (match.comments || []).length > 0 && match.status !== "played";
                                 return (
                                   <button
                                     key={match.id}

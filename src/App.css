@@ -2077,6 +2077,12 @@ body {
   justify-content: space-between;
 }
 
+.matches-layout__toolbar .segmented.segmented--scroll {
+  flex: 1 1 auto;
+  min-width: 0;
+  max-width: 100%;
+}
+
 .match-board {
   display: grid;
   gap: 8px;
