@@ -826,75 +826,170 @@ body {
   font-size: 18px;
 }
 
-.player-history-modal__hint {
-  margin: 0 0 12px;
-  font-size: 13px;
+.player-history-modal__lead {
+  margin: 0 0 10px;
+  font-size: 14px;
   color: var(--text-secondary);
   line-height: 1.45;
 }
 
-.player-history-modal__list {
-  list-style: none;
-  margin: 0;
-  padding: 0;
-  max-height: min(58vh, 520px);
-  overflow-y: auto;
+.player-history-modal__legend {
+  margin: 0 0 12px;
+  font-size: 13px;
+  color: var(--text-secondary);
+  line-height: 1.45;
+  border: 1px solid color-mix(in oklab, var(--separator) 90%, var(--foreground));
+  border-radius: 10px;
+  padding: 8px 10px;
+  background: color-mix(in oklab, var(--fill-secondary) 88%, transparent);
 }
 
-.player-history-modal__item {
-  display: grid;
-  grid-template-columns: minmax(0, 1fr) auto;
-  gap: 6px 12px;
-  padding: 12px 0;
+.player-history-modal__legend summary {
+  cursor: pointer;
+  font-weight: 600;
+  color: var(--text);
+}
+
+.player-history-modal__legend ul {
+  margin: 8px 0 0;
+  padding-left: 1.15rem;
+}
+
+.player-history-modal__legend li {
+  margin-bottom: 6px;
+}
+
+.player-history-modal__legend li:last-child {
+  margin-bottom: 0;
+}
+
+.player-history-modal__table-wrap {
+  max-height: min(56vh, 480px);
+  overflow: auto;
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  background: var(--bg-elevated);
+  -webkit-overflow-scrolling: touch;
+}
+
+.player-history-modal__table {
+  width: 100%;
+  min-width: 280px;
+  border-collapse: collapse;
+  font-size: 14px;
+}
+
+.player-history-modal__table thead th {
+  position: sticky;
+  top: 0;
+  z-index: 1;
+  text-align: left;
+  padding: 10px 10px;
+  font-size: 11px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--text-tertiary);
+  background: color-mix(in oklab, var(--fill-secondary) 94%, var(--bg-elevated));
   border-bottom: 1px solid var(--separator);
-  align-items: start;
+  white-space: nowrap;
 }
 
-.player-history-modal__item:last-child {
+.player-history-modal__table tbody td {
+  padding: 11px 10px;
+  vertical-align: middle;
+  border-bottom: 1px solid var(--separator);
+}
+
+.player-history-modal__table tbody tr:last-child td {
   border-bottom: none;
 }
 
-.player-history-modal__meta {
+.player-history-modal__date-cell {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+
+.player-history-modal__date-main {
+  font-weight: 600;
+  color: var(--text);
+}
+
+.player-history-modal__date-sub {
   font-size: 12px;
+  font-weight: 600;
   color: var(--text-tertiary);
-  font-weight: 600;
-  letter-spacing: 0.03em;
+  font-variant-numeric: tabular-nums;
 }
 
-.player-history-modal__line {
-  margin: 2px 0 0;
-  font-size: 15px;
+.player-history-modal__cell--opponent {
   font-weight: 600;
-  line-height: 1.35;
+  color: var(--text);
+  word-break: break-word;
+  max-width: 12rem;
 }
 
-.player-history-modal__status {
-  font-size: 13px;
-  font-weight: 700;
+.player-history-modal__cell--status {
   text-align: right;
-  line-height: 1.35;
-  max-width: 11rem;
-  justify-self: end;
+  white-space: nowrap;
 }
 
-.player-history-modal__status--played {
-  color: #248a3d;
+.player-history-modal__branch-tag {
+  display: inline-block;
+  font-size: 12px;
+  font-weight: 700;
+  padding: 3px 8px;
+  border-radius: 999px;
+  background: color-mix(in oklab, var(--muted) 55%, var(--bg-elevated));
+  color: var(--text-secondary);
+  border: 1px solid color-mix(in oklab, var(--separator) 80%, transparent);
 }
 
-.player-history-modal__status--declined {
-  color: #c41c14;
+.player-history-modal__badge {
+  display: inline-block;
+  font-size: 12px;
+  font-weight: 700;
+  padding: 5px 10px;
+  border-radius: 999px;
+  line-height: 1.2;
+  max-width: 100%;
+  text-align: center;
 }
 
-.player-history-modal__status--pending {
+.player-history-modal__badge--played {
+  background: rgba(52, 199, 89, 0.16);
+  color: #1b6b32;
+}
+
+.player-history-modal__badge--declined {
+  background: rgba(255, 59, 48, 0.14);
+  color: #a10f0f;
+}
+
+.player-history-modal__badge--pending {
+  background: color-mix(in oklab, var(--tint) 12%, var(--bg-elevated));
+  color: var(--tint);
+}
+
+.player-history-modal__badge--warn {
+  background: rgba(255, 149, 0, 0.14);
+  color: #9a5b00;
+}
+
+.player-history-modal__badge--muted {
+  background: color-mix(in oklab, var(--muted) 40%, transparent);
   color: var(--text-secondary);
 }
 
-.player-history-modal__status--neutral {
+.player-history-modal__badge--neutral {
+  background: color-mix(in oklab, var(--muted) 35%, transparent);
   color: var(--text-secondary);
 }
 
 .modal-sheet--wide {
-  width: min(100%, 520px);
+  width: min(100%, 600px);
   max-height: min(88vh, 720px);
 }
 

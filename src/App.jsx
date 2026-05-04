@@ -1019,11 +1019,13 @@ function participationKindLabelSv(kind) {
   }
 }
 
-function participationKindStatusClass(kind) {
-  if (kind === "played") return "player-history-modal__status player-history-modal__status--played";
-  if (kind === "declined") return "player-history-modal__status player-history-modal__status--declined";
-  if (kind === "squad_pending") return "player-history-modal__status player-history-modal__status--pending";
-  return "player-history-modal__status player-history-modal__status--neutral";
+function participationKindBadgeClass(kind) {
+  if (kind === "played") return "player-history-modal__badge player-history-modal__badge--played";
+  if (kind === "declined") return "player-history-modal__badge player-history-modal__badge--declined";
+  if (kind === "squad_pending") return "player-history-modal__badge player-history-modal__badge--pending";
+  if (kind === "squad_unavailable_played") return "player-history-modal__badge player-history-modal__badge--warn";
+  if (kind === "squad_not_counted") return "player-history-modal__badge player-history-modal__badge--muted";
+  return "player-history-modal__badge player-history-modal__badge--neutral";
 }
 
 function formatTimestampSv(iso) {
@@ -4566,27 +4568,65 @@ export default function App() {
                 <h4 className="modal-sheet__title" id="player-history-title">
                   Matcher — {state.players.find((x) => x.id === overviewHistoryPlayerId)?.name ?? "Spelare"}
                 </h4>
-                <p className="player-history-modal__hint">
-                  Alla matcher i kalenderordning för den här spelaren. «Spelade» = räknas som deltagare i genomförd
-                  match (samma regler som i översikten). «Vald i truppen» = matchen är inte markerad som spelad än.
+                <p className="player-history-modal__lead">
+                  Alla matcher i <strong>datumordning</strong> (kalender). Matchnummer följer säsongens ordning och
+                  behöver inte ligga i nummerföljd här.
                 </p>
-                <ul className="player-history-modal__list">
-                  {overviewPlayerHistoryRows.map((row) => (
-                    <li key={row.match.id} className="player-history-modal__item">
-                      <div>
-                        <div className="player-history-modal__meta">
-                          Match {row.matchNo} · {row.branchLabel}
-                        </div>
-                        <p className="player-history-modal__line">
-                          {row.dateLabel} · {row.opponent}
-                        </p>
-                      </div>
-                      <span className={participationKindStatusClass(row.kind)}>
-                        {participationKindLabelSv(row.kind)}
-                      </span>
+                <details className="player-history-modal__legend">
+                  <summary>Förklaring av status</summary>
+                  <ul>
+                    <li>
+                      <strong>Spelade</strong> — deltog och räknas som deltagare i en genomförd match (samma regler som
+                      statistiköversikten).
                     </li>
-                  ))}
-                </ul>
+                    <li>
+                      <strong>Vald i truppen</strong> — finns i truppen; matchen är inte markerad som spelad än.
+                    </li>
+                    <li>
+                      <strong>Tackade nej</strong> — tackat nej till matchen.
+                    </li>
+                    <li>
+                      <strong>Inte i truppen</strong> — inte med i den valda truppen för matchen.
+                    </li>
+                    <li>
+                      <strong>Övriga</strong> — t.ex. otillgänglig trots trupp, eller i trupp men räknas inte (årskull
+                      vs lagtyp).
+                    </li>
+                  </ul>
+                </details>
+                <div className="player-history-modal__table-wrap">
+                  <table className="player-history-modal__table">
+                    <thead>
+                      <tr>
+                        <th scope="col">Datum</th>
+                        <th scope="col">Motståndare</th>
+                        <th scope="col">Lag</th>
+                        <th scope="col">Status</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {overviewPlayerHistoryRows.map((row) => (
+                        <tr key={row.match.id}>
+                          <td>
+                            <div className="player-history-modal__date-cell">
+                              <span className="player-history-modal__date-main">{row.dateLabel}</span>
+                              <span className="player-history-modal__date-sub">Match {row.matchNo}</span>
+                            </div>
+                          </td>
+                          <td className="player-history-modal__cell--opponent">{row.opponent}</td>
+                          <td>
+                            <span className="player-history-modal__branch-tag">{row.branchLabel}</span>
+                          </td>
+                          <td className="player-history-modal__cell--status">
+                            <span className={participationKindBadgeClass(row.kind)}>
+                              {participationKindLabelSv(row.kind)}
+                            </span>
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
                 <div className="modal-sheet__actions">
                   <button type="button" className="btn btn--secondary" onClick={() => setOverviewHistoryPlayerId(null)}>
                     Stäng
