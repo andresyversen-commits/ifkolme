@@ -58,6 +58,27 @@ export function isAllowedP11SquadPlayer(p) {
   return y === 2014 || y === 2015 || y === 2016;
 }
 
+export function matchBranchKey(m) {
+  return m.branch === "p11" ? "p11" : "p10";
+}
+
+/**
+ * Räknas som deltagen i en genomförd match, med valt lag (gren).
+ * `teamScope`: "p10" | "p11" | "both" — vid "both" används P10- eller P11-regel per match.
+ */
+export function playerCountsAsPlayedInMatchForTeamScope(m, playerId, state, teamScope) {
+  if (m.status !== "played") return false;
+  const br = matchBranchKey(m);
+  if (teamScope === "p10" && br !== "p10") return false;
+  if (teamScope === "p11" && br !== "p11") return false;
+  if (!m.selectedPlayerIds?.includes(playerId)) return false;
+  if (Array.isArray(m.declinedPlayerIds) && m.declinedPlayerIds.includes(playerId)) return false;
+  const pl = state.players.find((x) => x.id === playerId);
+  if (!pl || !isPlayerAvailable(pl)) return false;
+  if (br === "p11") return isAllowedP11SquadPlayer(pl);
+  return isEligibleForMatchSquad(pl);
+}
+
 /** Alla registrerade födda 2014, namnordning. */
 export function sortedAllPlayerIds2014(state) {
   return (state.players || [])

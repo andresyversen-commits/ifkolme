@@ -4,7 +4,13 @@ import { useRegisterSW } from "virtual:pwa-register/react";
 import { Button } from "@/components/ui/button";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { normalizeClubName, resolveTeamLogoUrl, teamInitials } from "@/lib/teamLogos";
-import { birthYearNum, matchSquadMode, p11Assist2016Count, compareMatchesChronologically } from "../selection.mjs";
+import {
+  birthYearNum,
+  matchSquadMode,
+  p11Assist2016Count,
+  compareMatchesChronologically,
+  playerCountsAsPlayedInMatchForTeamScope,
+} from "../selection.mjs";
 
 const PROD_API_FALLBACK = "https://ifkolme-production.up.railway.app";
 const configuredApiBase = import.meta.env.VITE_API_BASE_URL?.trim();
@@ -2675,8 +2681,10 @@ export default function App() {
   const [editYear, setEditYear] = useState("2016");
   const [editJerseyNumber, setEditJerseyNumber] = useState("");
   const [editPreferredPosition, setEditPreferredPosition] = useState("");
-  /** Statistik: p10 = födda 2015+2016, club = alla registrerade. */
-  const [overviewBirth, setOverviewBirth] = useState("p10");
+  /** Statistik: vilket lags matcher som räknas (P10 / P11 / båda). */
+  const [overviewTeam, setOverviewTeam] = useState("p10");
+  /** Statistik: visa spelare födda detta år (alla = alla registrerade). */
+  const [overviewPlayerYear, setOverviewPlayerYear] = useState("all");
   const [overviewAge, setOverviewAge] = useState("all");
   /** Underflikar inom Spelargrupp: spelarlista, grupper eller tränare */
   const [playerSubTab, setPlayerSubTab] = useState("players");
@@ -2790,11 +2798,18 @@ export default function App() {
       if (ui) {
         const parsedUi = JSON.parse(ui);
         if (parsedUi?.playerSubTab) setPlayerSubTab(parsedUi.playerSubTab);
-        if (parsedUi?.overviewBirth) {
+        if (parsedUi?.overviewTeam && ["p10", "p11", "both"].includes(parsedUi.overviewTeam)) {
+          setOverviewTeam(parsedUi.overviewTeam);
+        } else if (parsedUi?.overviewBirth) {
           let ob = parsedUi.overviewBirth;
           if (ob === "all") ob = "p10";
           if (!["p10", "club", "2014", "2015", "2016"].includes(ob)) ob = "p10";
-          setOverviewBirth(ob);
+          setOverviewTeam(ob === "club" ? "both" : "p10");
+        }
+        if (parsedUi?.overviewPlayerYear && ["all", "2014", "2015", "2016"].includes(parsedUi.overviewPlayerYear)) {
+          setOverviewPlayerYear(parsedUi.overviewPlayerYear);
+        } else if (parsedUi?.overviewBirth && ["2014", "2015", "2016"].includes(parsedUi.overviewBirth)) {
+          setOverviewPlayerYear(parsedUi.overviewBirth);
         }
         if (parsedUi?.overviewAge) setOverviewAge(parsedUi.overviewAge);
         if (parsedUi?.activeMatchId) setActiveMatchId(parsedUi.activeMatchId);
@@ -2912,12 +2927,20 @@ export default function App() {
     try {
       localStorage.setItem(
         LS_UI_KEY,
-        JSON.stringify({ playerSubTab, overviewBirth, overviewAge, activeMatchId, matchListScope, icsUrl }),
+        JSON.stringify({
+          playerSubTab,
+          overviewTeam,
+          overviewPlayerYear,
+          overviewAge,
+          activeMatchId,
+          matchListScope,
+          icsUrl,
+        }),
       );
     } catch {
       // Ignorera localStorage-fel.
     }
-  }, [playerSubTab, overviewBirth, overviewAge, activeMatchId, matchListScope, icsUrl]);
+  }, [playerSubTab, overviewTeam, overviewPlayerYear, overviewAge, activeMatchId, matchListScope, icsUrl]);
 
   useEffect(() => {
     const incoming = Array.isArray(state?.coaches)
@@ -2953,21 +2976,57 @@ export default function App() {
     return () => window.removeEventListener("beforeinstallprompt", onBeforeInstall);
   }, []);
 
-  const playersSorted = state
-    ? [...state.players].sort((a, b) => {
-        if (a.matchesPlayed !== b.matchesPlayed) return a.matchesPlayed - b.matchesPlayed;
-        return a.name.localeCompare(b.name, "sv");
-      })
-    : [];
-  const declineCountByPlayer = useMemo(() => {
-    const map = new Map();
-    for (const m of state?.matches || []) {
-      for (const id of m?.declinedPlayerIds || []) {
-        map.set(id, (map.get(id) || 0) + 1);
+  const overviewScopeStats = useMemo(() => {
+    if (!state?.players || !state?.matches) {
+      return {
+        matchesTotal: 0,
+        matchesPlayed: 0,
+        byPlayer: new Map(),
+        declines: new Map(),
+      };
+    }
+    const scopedMatches = state.matches.filter((m) => {
+      const br = m.branch === "p11" ? "p11" : "p10";
+      if (overviewTeam === "both") return true;
+      return overviewTeam === br;
+    });
+    const playedScope = scopedMatches.filter((m) => m.status === "played");
+    const byPlayer = new Map();
+    for (const p of state.players) {
+      let n = 0;
+      let lastM = null;
+      for (const m of playedScope) {
+        if (playerCountsAsPlayedInMatchForTeamScope(m, p.id, state, overviewTeam)) {
+          n++;
+          if (!lastM || compareMatchesChronologically(m, lastM) > 0) lastM = m;
+        }
+      }
+      byPlayer.set(p.id, { n, lastNumber: lastM != null ? lastM.number : null });
+    }
+    const declines = new Map();
+    for (const m of scopedMatches) {
+      for (const id of m.declinedPlayerIds || []) {
+        declines.set(id, (declines.get(id) || 0) + 1);
       }
     }
-    return map;
-  }, [state?.matches]);
+    return {
+      matchesTotal: scopedMatches.length,
+      matchesPlayed: playedScope.length,
+      byPlayer,
+      declines,
+    };
+  }, [state, overviewTeam]);
+
+  const playersSortedForOverview = useMemo(() => {
+    if (!state?.players) return [];
+    const { byPlayer } = overviewScopeStats;
+    return [...state.players].sort((a, b) => {
+      const na = byPlayer.get(a.id)?.n ?? 0;
+      const nb = byPlayer.get(b.id)?.n ?? 0;
+      if (nb !== na) return nb - na;
+      return a.name.localeCompare(b.name, "sv");
+    });
+  }, [state?.players, overviewScopeStats]);
 
   const uniqueAges = state
     ? [...new Set(state.players.map((p) => playerAge(birthYearNum(p))).filter((a) => Number.isFinite(a)))].sort(
@@ -2976,21 +3035,18 @@ export default function App() {
     : [];
 
   const playersAfterBirthFilter = useMemo(() => {
-    return playersSorted.filter((p) => {
+    return playersSortedForOverview.filter((p) => {
       const y = birthYearNum(p);
-      if (overviewBirth === "p10") return y === 2015 || y === 2016;
-      if (overviewBirth === "club") return true;
-      return y === Number(overviewBirth);
+      if (overviewPlayerYear === "all") return true;
+      return y === Number(overviewPlayerYear);
     });
-  }, [playersSorted, overviewBirth]);
+  }, [playersSortedForOverview, overviewPlayerYear]);
 
   const playersOverview = playersAfterBirthFilter.filter((p) => {
     if (overviewAge !== "all" && playerAge(birthYearNum(p)) !== Number(overviewAge)) return false;
     return true;
   });
 
-  const matchesCompleted = state ? state.matches.filter((m) => m.status === "played").length : 0;
-  const matchesTotal = state ? state.matches.length : 0;
   const rotationView = state?.rotationView;
 
   const matchesCalendar = useMemo(() => {
@@ -4316,31 +4372,36 @@ export default function App() {
 
           <p className="overview-meta">
             <span>
-              Genomförda matcher: <strong>{matchesCompleted}</strong> / {matchesTotal}
+              Genomförda matcher
+              {overviewTeam === "both"
+                ? " (båda lagen)"
+                : overviewTeam === "p11"
+                  ? " (P 11)"
+                  : " (P 10)"}
+              : <strong>{overviewScopeStats.matchesPlayed}</strong> / {overviewScopeStats.matchesTotal}
             </span>
             <span>
-              Visar <strong>{playersOverview.length}</strong> av <strong>{playersAfterBirthFilter.length}</strong>{" "}
-              enligt födelseår
+              Visar <strong>{playersOverview.length}</strong> av <strong>{playersAfterBirthFilter.length}</strong> spelare
+              {overviewPlayerYear !== "all" ? ` födda ${overviewPlayerYear}` : ""}
               {overviewAge !== "all" ? " (åldersfilter aktivt)" : ""}
             </span>
           </p>
 
           <div className="filter-block">
-            <span className="filter-block__label">P10-statistik / födelseår</span>
-            <div className="segmented segmented--filter" role="group" aria-label="P10-statistik efter födelseår">
+            <span className="filter-block__label">Lag / matcher</span>
+            <div className="segmented segmented--filter" role="group" aria-label="Vilket lags matcher som räknas">
               {[
-                { id: "p10", label: "Alla P10" },
-                { id: "2015", label: "2015" },
-                { id: "2016", label: "2016" },
-                { id: "club", label: "Hela truppen" },
+                { id: "p10", label: "P 10" },
+                { id: "p11", label: "P 11" },
+                { id: "both", label: "Båda lagen" },
               ].map((o) => (
                 <button
                   key={o.id}
                   type="button"
                   className="segmented__btn"
-                  aria-selected={overviewBirth === o.id}
+                  aria-selected={overviewTeam === o.id}
                   onClick={() => {
-                    setOverviewBirth(o.id);
+                    setOverviewTeam(o.id);
                     setOverviewAge("all");
                   }}
                 >
@@ -4349,9 +4410,34 @@ export default function App() {
               ))}
             </div>
             <p className="text-muted" style={{ margin: "8px 0 0", fontSize: 13 }}>
-              Alla P10 = födda 2015 och 2016. Väljer du bara 2015 eller 2016 och sedan{" "}
-              <strong>Alla åldrar</strong> byts vyn tillbaka till alla P10. Hela truppen inkluderar även 2014 m.m.
+              Antal matcher och spelarantal gäller bara valt lag. <strong>Båda lagen</strong> summerar P 10- och P
+              11-matcher (2014 räknas bara som deltagen i P 11 enligt samma regler som i truppen).
             </p>
+          </div>
+
+          <div className="filter-block">
+            <span className="filter-block__label">Födelseår (vilka spelare som visas)</span>
+            <div className="segmented segmented--filter segmented--scroll" role="group" aria-label="Filtrera spelare på födelseår">
+              {[
+                { id: "all", label: "Alla" },
+                { id: "2014", label: "2014" },
+                { id: "2015", label: "2015" },
+                { id: "2016", label: "2016" },
+              ].map((o) => (
+                <button
+                  key={o.id}
+                  type="button"
+                  className="segmented__btn"
+                  aria-selected={overviewPlayerYear === o.id}
+                  onClick={() => {
+                    setOverviewPlayerYear(o.id);
+                    setOverviewAge("all");
+                  }}
+                >
+                  {o.label}
+                </button>
+              ))}
+            </div>
           </div>
 
           <div className="filter-block">
@@ -4361,10 +4447,7 @@ export default function App() {
                 type="button"
                 className="segmented__btn"
                 aria-selected={overviewAge === "all"}
-                onClick={() => {
-                  setOverviewAge("all");
-                  setOverviewBirth((b) => (b === "2015" || b === "2016" ? "p10" : b));
-                }}
+                onClick={() => setOverviewAge("all")}
               >
                 Alla åldrar
               </button>
@@ -4393,7 +4476,9 @@ export default function App() {
                 <span>Tackat nej</span>
                 <span>Senast</span>
               </div>
-              {playersOverview.map((p) => (
+              {playersOverview.map((p) => {
+                const sp = overviewScopeStats.byPlayer.get(p.id);
+                return (
                 <div key={p.id} className="stat-row">
                   <p className="stat-row__name">
                     {p.name}
@@ -4405,11 +4490,12 @@ export default function App() {
                   <span className="stat-row__year">
                     {Number.isFinite(birthYearNum(p)) ? birthYearNum(p) : "—"}
                   </span>
-                  <span className="stat-row__value">{p.matchesPlayed}</span>
-                  <span className="stat-row__declined">{declineCountByPlayer.get(p.id) || 0}</span>
-                  <span className="stat-row__last">{p.lastPlayedMatchNumber != null ? p.lastPlayedMatchNumber : "—"}</span>
+                  <span className="stat-row__value">{sp?.n ?? 0}</span>
+                  <span className="stat-row__declined">{overviewScopeStats.declines.get(p.id) || 0}</span>
+                  <span className="stat-row__last">{sp?.lastNumber != null ? sp.lastNumber : "—"}</span>
                 </div>
-              ))}
+                );
+              })}
             </div>
           )}
 
