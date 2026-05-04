@@ -51,7 +51,7 @@ async function api(path, options = {}) {
 const TABS = [
   { id: "players", label: "Spelargrupp" },
   { id: "matches", label: "Matcher" },
-  { id: "overview", label: "Statistik" },
+  { id: "overview", label: "Statistikk" },
   { id: "test", label: "Test" },
   { id: "settings", label: "Inställningar" },
 ];
@@ -2683,9 +2683,8 @@ export default function App() {
   const [editPreferredPosition, setEditPreferredPosition] = useState("");
   /** Statistik: vilket lags matcher som räknas (P10 / P11 / båda). */
   const [overviewTeam, setOverviewTeam] = useState("p10");
-  /** Statistik: visa spelare födda detta år (alla = alla registrerade). */
+  /** Statistikk: spillerfilter — «2015» betyr født 2014 eller 2015 (éi flis). */
   const [overviewPlayerYear, setOverviewPlayerYear] = useState("all");
-  const [overviewAge, setOverviewAge] = useState("all");
   /** Underflikar inom Spelargrupp: spelarlista, grupper eller tränare */
   const [playerSubTab, setPlayerSubTab] = useState("players");
   /** Underflikar inom Matcher: P10 / P11 */
@@ -2806,12 +2805,15 @@ export default function App() {
           if (!["p10", "club", "2014", "2015", "2016"].includes(ob)) ob = "p10";
           setOverviewTeam(ob === "club" ? "both" : "p10");
         }
-        if (parsedUi?.overviewPlayerYear && ["all", "2014", "2015", "2016"].includes(parsedUi.overviewPlayerYear)) {
+        if (parsedUi?.overviewPlayerYear && ["all", "2015", "2016"].includes(parsedUi.overviewPlayerYear)) {
           setOverviewPlayerYear(parsedUi.overviewPlayerYear);
-        } else if (parsedUi?.overviewBirth && ["2014", "2015", "2016"].includes(parsedUi.overviewBirth)) {
+        } else if (parsedUi?.overviewPlayerYear === "2014") {
+          setOverviewPlayerYear("2015");
+        } else if (parsedUi?.overviewBirth && ["2015", "2016"].includes(parsedUi.overviewBirth)) {
           setOverviewPlayerYear(parsedUi.overviewBirth);
+        } else if (parsedUi?.overviewBirth === "2014") {
+          setOverviewPlayerYear("2015");
         }
-        if (parsedUi?.overviewAge) setOverviewAge(parsedUi.overviewAge);
         if (parsedUi?.activeMatchId) setActiveMatchId(parsedUi.activeMatchId);
         if (parsedUi?.matchListScope && ["upcoming", "played", "all"].includes(parsedUi.matchListScope)) {
           setMatchListScope(parsedUi.matchListScope);
@@ -2931,7 +2933,6 @@ export default function App() {
           playerSubTab,
           overviewTeam,
           overviewPlayerYear,
-          overviewAge,
           activeMatchId,
           matchListScope,
           icsUrl,
@@ -2940,7 +2941,7 @@ export default function App() {
     } catch {
       // Ignorera localStorage-fel.
     }
-  }, [playerSubTab, overviewTeam, overviewPlayerYear, overviewAge, activeMatchId, matchListScope, icsUrl]);
+  }, [playerSubTab, overviewTeam, overviewPlayerYear, activeMatchId, matchListScope, icsUrl]);
 
   useEffect(() => {
     const incoming = Array.isArray(state?.coaches)
@@ -3028,24 +3029,16 @@ export default function App() {
     });
   }, [state?.players, overviewScopeStats]);
 
-  const uniqueAges = state
-    ? [...new Set(state.players.map((p) => playerAge(birthYearNum(p))).filter((a) => Number.isFinite(a)))].sort(
-        (a, b) => a - b,
-      )
-    : [];
-
   const playersAfterBirthFilter = useMemo(() => {
     return playersSortedForOverview.filter((p) => {
       const y = birthYearNum(p);
       if (overviewPlayerYear === "all") return true;
-      return y === Number(overviewPlayerYear);
+      if (overviewPlayerYear === "2015") return y === 2014 || y === 2015;
+      return y === 2016;
     });
   }, [playersSortedForOverview, overviewPlayerYear]);
 
-  const playersOverview = playersAfterBirthFilter.filter((p) => {
-    if (overviewAge !== "all" && playerAge(birthYearNum(p)) !== Number(overviewAge)) return false;
-    return true;
-  });
+  const playersOverview = playersAfterBirthFilter;
 
   const rotationView = state?.rotationView;
 
@@ -4368,60 +4361,59 @@ export default function App() {
 
       {tab === "overview" && (
         <section className="panel" role="tabpanel" id="panel-overview" aria-labelledby="tab-overview">
-          <h2 className="panel__title">Statistik</h2>
+          <h2 className="panel__title">Statistikk</h2>
 
           <p className="overview-meta">
             <span>
-              Genomförda matcher
+              Gjennomførte kamper
               {overviewTeam === "both"
-                ? " (båda lagen)"
+                ? " (begge lag)"
                 : overviewTeam === "p11"
                   ? " (P 11)"
                   : " (P 10)"}
               : <strong>{overviewScopeStats.matchesPlayed}</strong> / {overviewScopeStats.matchesTotal}
             </span>
             <span>
-              Visar <strong>{playersOverview.length}</strong> av <strong>{playersAfterBirthFilter.length}</strong> spelare
-              {overviewPlayerYear !== "all" ? ` födda ${overviewPlayerYear}` : ""}
-              {overviewAge !== "all" ? " (åldersfilter aktivt)" : ""}
+              Viser <strong>{playersOverview.length}</strong> av <strong>{playersAfterBirthFilter.length}</strong> spillere
+              {overviewPlayerYear === "2015"
+                ? " født 2014 eller 2015"
+                : overviewPlayerYear === "2016"
+                  ? " født 2016"
+                  : ""}
             </span>
           </p>
 
           <div className="filter-block">
-            <span className="filter-block__label">Lag / matcher</span>
-            <div className="segmented segmented--filter" role="group" aria-label="Vilket lags matcher som räknas">
+            <span className="filter-block__label">Lag / kamper</span>
+            <div className="segmented segmented--filter" role="group" aria-label="Hvilket lags kamper som telles">
               {[
                 { id: "p10", label: "P 10" },
                 { id: "p11", label: "P 11" },
-                { id: "both", label: "Båda lagen" },
+                { id: "both", label: "Begge lag" },
               ].map((o) => (
                 <button
                   key={o.id}
                   type="button"
                   className="segmented__btn"
                   aria-selected={overviewTeam === o.id}
-                  onClick={() => {
-                    setOverviewTeam(o.id);
-                    setOverviewAge("all");
-                  }}
+                  onClick={() => setOverviewTeam(o.id)}
                 >
                   {o.label}
                 </button>
               ))}
             </div>
             <p className="text-muted" style={{ margin: "8px 0 0", fontSize: 13 }}>
-              Antal matcher och spelarantal gäller bara valt lag. <strong>Båda lagen</strong> summerar P 10- och P
-              11-matcher (2014 räknas bara som deltagen i P 11 enligt samma regler som i truppen).
+              Tallene gjelder valgt lag. <strong>Begge lag</strong> summerer P 10- og P 11-kamper (født 2014 telles
+              bare som deltaker i P 11, samme regler som i troppen).
             </p>
           </div>
 
           <div className="filter-block">
-            <span className="filter-block__label">Födelseår (vilka spelare som visas)</span>
-            <div className="segmented segmented--filter segmented--scroll" role="group" aria-label="Filtrera spelare på födelseår">
+            <span className="filter-block__label">Hvilke spillere som vises</span>
+            <div className="segmented segmented--filter segmented--scroll" role="group" aria-label="Filtrer spillere etter fødselsår">
               {[
-                { id: "all", label: "Alla" },
-                { id: "2014", label: "2014" },
-                { id: "2015", label: "2015" },
+                { id: "all", label: "Alle" },
+                { id: "2015", label: "2014–2015" },
                 { id: "2016", label: "2016" },
               ].map((o) => (
                 <button
@@ -4429,52 +4421,27 @@ export default function App() {
                   type="button"
                   className="segmented__btn"
                   aria-selected={overviewPlayerYear === o.id}
-                  onClick={() => {
-                    setOverviewPlayerYear(o.id);
-                    setOverviewAge("all");
-                  }}
+                  onClick={() => setOverviewPlayerYear(o.id)}
                 >
                   {o.label}
                 </button>
               ))}
             </div>
-          </div>
-
-          <div className="filter-block">
-            <span className="filter-block__label">Ålder ({seasonYear()})</span>
-            <div className="segmented segmented--filter segmented--scroll" role="group" aria-label="Filtrera på ålder">
-              <button
-                type="button"
-                className="segmented__btn"
-                aria-selected={overviewAge === "all"}
-                onClick={() => setOverviewAge("all")}
-              >
-                Alla åldrar
-              </button>
-              {uniqueAges.map((a) => (
-                <button
-                  key={a}
-                  type="button"
-                  className="segmented__btn"
-                  aria-selected={overviewAge === String(a)}
-                  onClick={() => setOverviewAge(String(a))}
-                >
-                  {a} år
-                </button>
-              ))}
-            </div>
+            <p className="text-muted" style={{ margin: "8px 0 0", fontSize: 13 }}>
+              <strong>2014–2015</strong> viser alle født i 2014 og 2015 sammen (ingen egen knapp for bare 2014).
+            </p>
           </div>
 
           {playersOverview.length === 0 ? (
-            <p className="empty-hint">Inga spelare matchar filtren.</p>
+            <p className="empty-hint">Ingen spillere samsvarer med filteret.</p>
           ) : (
             <div className="stat-list stat-list--5col">
               <div className="stat-head" aria-hidden>
-                <span>Namn</span>
-                <span>År</span>
-                <span>Antal matcher</span>
-                <span>Tackat nej</span>
-                <span>Senast</span>
+                <span>Navn</span>
+                <span title="Fødselsår">Født</span>
+                <span title="Gjennomførte kamper der spilleren telles som deltaker (innen valgt lag)">Kamper</span>
+                <span title="Antall ganger spilleren har takket nei til kamp (kamper i valgt lag)">Takket nei</span>
+                <span title="Sesongens kampnummer på siste kamp spilleren deltok i (innen valgt lag)">Siste</span>
               </div>
               {playersOverview.map((p) => {
                 const sp = overviewScopeStats.byPlayer.get(p.id);
