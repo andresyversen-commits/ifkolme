@@ -7,9 +7,11 @@ import { normalizeClubName, resolveTeamLogoUrl, teamInitials } from "@/lib/teamL
 import {
   birthYearNum,
   matchSquadMode,
+  matchBranchKey,
   p11Assist2016Count,
   compareMatchesChronologically,
   playerCountsAsPlayedInMatchForTeamScope,
+  playerMatchParticipationKind,
 } from "../selection.mjs";
 
 const PROD_API_FALLBACK = "https://ifkolme-production.up.railway.app";
@@ -987,6 +989,41 @@ function formatFixtureDateSv(isoDate) {
   const [y, mo, d] = parts;
   const dt = new Date(y, mo - 1, d);
   return dt.toLocaleDateString("sv-SE", { weekday: "short", day: "numeric", month: "short" });
+}
+
+function fixtureOpponentLabel(m) {
+  const home = String(m.fixture?.home || m.fixture?.homeTeam || "").trim();
+  const away = String(m.fixture?.away || m.fixture?.awayTeam || "").trim();
+  if (!home && !away) return "Motståndare saknas";
+  if (/ifk\s*ölme/i.test(home) || /ifk\s*olme/i.test(home)) return away || home;
+  if (/ifk\s*ölme/i.test(away) || /ifk\s*olme/i.test(away)) return home || away;
+  return away || home;
+}
+
+function participationKindLabelNo(kind) {
+  switch (kind) {
+    case "played":
+      return "Spilte";
+    case "declined":
+      return "Takket nei";
+    case "not_in_squad":
+      return "Ikke i tropp";
+    case "squad_pending":
+      return "Valgt til tropp";
+    case "squad_unavailable_played":
+      return "Utilgjengelig (i tropp)";
+    case "squad_not_counted":
+      return "I tropp, telles ikke";
+    default:
+      return "—";
+  }
+}
+
+function participationKindStatusClass(kind) {
+  if (kind === "played") return "player-history-modal__status player-history-modal__status--played";
+  if (kind === "declined") return "player-history-modal__status player-history-modal__status--declined";
+  if (kind === "squad_pending") return "player-history-modal__status player-history-modal__status--pending";
+  return "player-history-modal__status player-history-modal__status--neutral";
 }
 
 function formatTimestampSv(iso) {
@@ -2685,6 +2722,8 @@ export default function App() {
   const [overviewTeam, setOverviewTeam] = useState("p10");
   /** Statistikk: spillerfilter — «2015» betyr født 2014 eller 2015 (éi flis). */
   const [overviewPlayerYear, setOverviewPlayerYear] = useState("all");
+  /** Statistikk: spiller som viser kampliste-modal */
+  const [overviewHistoryPlayerId, setOverviewHistoryPlayerId] = useState(null);
   /** Underflikar inom Spelargrupp: spelarlista, grupper eller tränare */
   const [playerSubTab, setPlayerSubTab] = useState("players");
   /** Underflikar inom Matcher: P10 / P11 */
@@ -2995,14 +3034,12 @@ export default function App() {
     const byPlayer = new Map();
     for (const p of state.players) {
       let n = 0;
-      let lastM = null;
       for (const m of playedScope) {
         if (playerCountsAsPlayedInMatchForTeamScope(m, p.id, state, overviewTeam)) {
           n++;
-          if (!lastM || compareMatchesChronologically(m, lastM) > 0) lastM = m;
         }
       }
-      byPlayer.set(p.id, { n, lastNumber: lastM != null ? lastM.number : null });
+      byPlayer.set(p.id, { n });
     }
     const declines = new Map();
     for (const m of scopedMatches) {
@@ -3039,6 +3076,28 @@ export default function App() {
   }, [playersSortedForOverview, overviewPlayerYear]);
 
   const playersOverview = playersAfterBirthFilter;
+
+  const overviewPlayerHistoryRows = useMemo(() => {
+    if (!state?.matches || !overviewHistoryPlayerId) return [];
+    const pid = overviewHistoryPlayerId;
+    return [...state.matches].sort(compareMatchesChronologically).map((m) => ({
+      match: m,
+      kind: playerMatchParticipationKind(m, pid, state),
+      dateLabel: formatFixtureDateSv(m.fixture?.date),
+      opponent: fixtureOpponentLabel(m),
+      branchLabel: matchBranchKey(m) === "p11" ? "P 11" : "P 10",
+      matchNo: m.number != null ? String(m.number) : "—",
+    }));
+  }, [state, overviewHistoryPlayerId]);
+
+  useEffect(() => {
+    if (!overviewHistoryPlayerId) return;
+    const onKey = (e) => {
+      if (e.key === "Escape") setOverviewHistoryPlayerId(null);
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [overviewHistoryPlayerId]);
 
   const rotationView = state?.rotationView;
 
@@ -4432,39 +4491,95 @@ export default function App() {
             </p>
           </div>
 
+          <p className="text-muted" style={{ margin: "0 0 10px", fontSize: 13 }}>
+            Trykk på ein spelar for alle kampar i rekkefølge — du ser om hen spelte, ikkje var med i troppen, eller
+            takka nei.
+          </p>
+
           {playersOverview.length === 0 ? (
             <p className="empty-hint">Ingen spillere samsvarer med filteret.</p>
           ) : (
-            <div className="stat-list stat-list--5col">
+            <div className="stat-list stat-list--overview">
               <div className="stat-head" aria-hidden>
                 <span>Navn</span>
                 <span title="Fødselsår">Født</span>
                 <span title="Gjennomførte kamper der spilleren telles som deltaker (innen valgt lag)">Kamper</span>
                 <span title="Antall ganger spilleren har takket nei til kamp (kamper i valgt lag)">Takket nei</span>
-                <span title="Sesongens kampnummer på siste kamp spilleren deltok i (innen valgt lag)">Siste</span>
               </div>
               {playersOverview.map((p) => {
                 const sp = overviewScopeStats.byPlayer.get(p.id);
                 return (
-                <div key={p.id} className="stat-row">
-                  <p className="stat-row__name">
-                    {p.name}
-                    <span style={{ fontWeight: 400, color: "var(--text-secondary)", fontSize: 14 }}>
-                      {" "}
-                      · {playerAge(birthYearNum(p))} år
+                  <button
+                    key={p.id}
+                    type="button"
+                    className="stat-row--clickable"
+                    onClick={() => setOverviewHistoryPlayerId(p.id)}
+                  >
+                    <p className="stat-row__name">
+                      {p.name}
+                      <span style={{ fontWeight: 400, color: "var(--text-secondary)", fontSize: 14 }}>
+                        {" "}
+                        · {playerAge(birthYearNum(p))} år
+                      </span>
+                    </p>
+                    <span className="stat-row__year">
+                      {Number.isFinite(birthYearNum(p)) ? birthYearNum(p) : "—"}
                     </span>
-                  </p>
-                  <span className="stat-row__year">
-                    {Number.isFinite(birthYearNum(p)) ? birthYearNum(p) : "—"}
-                  </span>
-                  <span className="stat-row__value">{sp?.n ?? 0}</span>
-                  <span className="stat-row__declined">{overviewScopeStats.declines.get(p.id) || 0}</span>
-                  <span className="stat-row__last">{sp?.lastNumber != null ? sp.lastNumber : "—"}</span>
-                </div>
+                    <span className="stat-row__value">{sp?.n ?? 0}</span>
+                    <span className="stat-row__declined">{overviewScopeStats.declines.get(p.id) || 0}</span>
+                  </button>
                 );
               })}
             </div>
           )}
+
+          {overviewHistoryPlayerId && state ? (
+            <div
+              className="modal-overlay"
+              role="presentation"
+              onMouseDown={(e) => {
+                if (e.target === e.currentTarget) setOverviewHistoryPlayerId(null);
+              }}
+            >
+              <div
+                className="modal-sheet modal-sheet--wide"
+                role="dialog"
+                aria-modal="true"
+                aria-labelledby="player-history-title"
+                onMouseDown={(e) => e.stopPropagation()}
+              >
+                <h4 className="modal-sheet__title" id="player-history-title">
+                  Kamper — {state.players.find((x) => x.id === overviewHistoryPlayerId)?.name ?? "Spelare"}
+                </h4>
+                <p className="player-history-modal__hint">
+                  Alle kampar i kalenderrekkefølge for denne spelaren. «Spilte» = telles som deltakar i avvikla kamp
+                  (same reglar som i oversikten). «Valgt til tropp» = kampen er ikkje merka som spelt enno.
+                </p>
+                <ul className="player-history-modal__list">
+                  {overviewPlayerHistoryRows.map((row) => (
+                    <li key={row.match.id} className="player-history-modal__item">
+                      <div>
+                        <div className="player-history-modal__meta">
+                          Kamp {row.matchNo} · {row.branchLabel}
+                        </div>
+                        <p className="player-history-modal__line">
+                          {row.dateLabel} · {row.opponent}
+                        </p>
+                      </div>
+                      <span className={participationKindStatusClass(row.kind)}>
+                        {participationKindLabelNo(row.kind)}
+                      </span>
+                    </li>
+                  ))}
+                </ul>
+                <div className="modal-sheet__actions">
+                  <button type="button" className="btn btn--secondary" onClick={() => setOverviewHistoryPlayerId(null)}>
+                    Lukk
+                  </button>
+                </div>
+              </div>
+            </div>
+          ) : null}
 
           <div className="group" style={{ padding: 12, marginTop: 20 }}>
             <p className="panel__lead" style={{ margin: "0 0 6px" }}>

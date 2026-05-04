@@ -79,6 +79,23 @@ export function playerCountsAsPlayedInMatchForTeamScope(m, playerId, state, team
   return isEligibleForMatchSquad(pl);
 }
 
+/**
+ * Deltakelse per kamp (spillerhistorikk), uten lag-filter — brukes i UI for alle matcher.
+ */
+export function playerMatchParticipationKind(match, playerId, state) {
+  const pl = state.players.find((x) => x.id === playerId);
+  if (!pl) return "unknown";
+  if (Array.isArray(match.declinedPlayerIds) && match.declinedPlayerIds.includes(playerId)) return "declined";
+  const inSquad = Array.isArray(match.selectedPlayerIds) && match.selectedPlayerIds.includes(playerId);
+  if (!inSquad) return "not_in_squad";
+  if (match.status !== "played") return "squad_pending";
+  if (!isPlayerAvailable(pl)) return "squad_unavailable_played";
+  const br = matchBranchKey(match);
+  const eligible = br === "p11" ? isAllowedP11SquadPlayer(pl) : isEligibleForMatchSquad(pl);
+  if (!eligible) return "squad_not_counted";
+  return "played";
+}
+
 /** Alla registrerade födda 2014, namnordning. */
 export function sortedAllPlayerIds2014(state) {
   return (state.players || [])
