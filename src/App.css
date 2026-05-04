@@ -863,13 +863,19 @@ body {
   margin-bottom: 0;
 }
 
-.player-history-modal__table-wrap {
-  max-height: min(56vh, 480px);
+/* En scroll-yta: modalen scrollar inte, bara denna ruta */
+.player-history-modal__scroller {
+  flex: 1 1 auto;
+  min-height: 0;
   overflow: auto;
+  -webkit-overflow-scrolling: touch;
+  scrollbar-gutter: stable;
+}
+
+.player-history-modal__table-wrap {
   border: 1px solid var(--border);
   border-radius: 12px;
   background: var(--bg-elevated);
-  -webkit-overflow-scrolling: touch;
 }
 
 .player-history-modal__table {
@@ -928,7 +934,6 @@ body {
   font-weight: 600;
   color: var(--text);
   word-break: break-word;
-  max-width: 12rem;
 }
 
 .player-history-modal__cell--status {
@@ -988,9 +993,30 @@ body {
   color: var(--text-secondary);
 }
 
-.modal-sheet--wide {
-  width: min(100%, 600px);
-  max-height: min(88vh, 720px);
+/* Spelarhistorik: stort fönster, ingen dubbel scrollbar (endast .player-history-modal__scroller scrollar) */
+.modal-sheet--player-history {
+  width: min(100%, min(96vw, 1120px));
+  max-height: min(94vh, 920px);
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  padding: 16px 20px 14px;
+}
+
+.modal-sheet--player-history .modal-sheet__title {
+  flex-shrink: 0;
+}
+
+.modal-sheet--player-history .player-history-modal__lead,
+.modal-sheet--player-history .player-history-modal__legend {
+  flex-shrink: 0;
+}
+
+.modal-sheet__actions--player-history {
+  flex-shrink: 0;
+  margin-top: 12px;
+  padding-top: 12px;
+  border-top: 1px solid var(--separator);
 }
 
 .group-editor {
@@ -1463,10 +1489,18 @@ body {
   padding: 12px 12px max(16px, env(safe-area-inset-bottom)) 12px;
 }
 
+.modal-overlay--player-history {
+  padding: 6px 8px max(10px, env(safe-area-inset-bottom));
+}
+
 @media (min-width: 520px) {
   .modal-overlay {
     align-items: center;
     padding: 24px;
+  }
+
+  .modal-overlay--player-history {
+    padding: 12px 16px 20px;
   }
 }
 

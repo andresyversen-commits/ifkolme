@@ -4552,14 +4552,14 @@ export default function App() {
 
           {overviewHistoryPlayerId && state ? (
             <div
-              className="modal-overlay"
+              className="modal-overlay modal-overlay--player-history"
               role="presentation"
               onMouseDown={(e) => {
                 if (e.target === e.currentTarget) setOverviewHistoryPlayerId(null);
               }}
             >
               <div
-                className="modal-sheet modal-sheet--wide"
+                className="modal-sheet modal-sheet--player-history"
                 role="dialog"
                 aria-modal="true"
                 aria-labelledby="player-history-title"
@@ -4594,40 +4594,42 @@ export default function App() {
                     </li>
                   </ul>
                 </details>
-                <div className="player-history-modal__table-wrap">
-                  <table className="player-history-modal__table">
-                    <thead>
-                      <tr>
-                        <th scope="col">Datum</th>
-                        <th scope="col">Motståndare</th>
-                        <th scope="col">Lag</th>
-                        <th scope="col">Status</th>
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {overviewPlayerHistoryRows.map((row) => (
-                        <tr key={row.match.id}>
-                          <td>
-                            <div className="player-history-modal__date-cell">
-                              <span className="player-history-modal__date-main">{row.dateLabel}</span>
-                              <span className="player-history-modal__date-sub">Match {row.matchNo}</span>
-                            </div>
-                          </td>
-                          <td className="player-history-modal__cell--opponent">{row.opponent}</td>
-                          <td>
-                            <span className="player-history-modal__branch-tag">{row.branchLabel}</span>
-                          </td>
-                          <td className="player-history-modal__cell--status">
-                            <span className={participationKindBadgeClass(row.kind)}>
-                              {participationKindLabelSv(row.kind)}
-                            </span>
-                          </td>
+                <div className="player-history-modal__scroller">
+                  <div className="player-history-modal__table-wrap">
+                    <table className="player-history-modal__table">
+                      <thead>
+                        <tr>
+                          <th scope="col">Datum</th>
+                          <th scope="col">Motståndare</th>
+                          <th scope="col">Lag</th>
+                          <th scope="col">Status</th>
                         </tr>
-                      ))}
-                    </tbody>
-                  </table>
+                      </thead>
+                      <tbody>
+                        {overviewPlayerHistoryRows.map((row) => (
+                          <tr key={row.match.id}>
+                            <td>
+                              <div className="player-history-modal__date-cell">
+                                <span className="player-history-modal__date-main">{row.dateLabel}</span>
+                                <span className="player-history-modal__date-sub">Match {row.matchNo}</span>
+                              </div>
+                            </td>
+                            <td className="player-history-modal__cell--opponent">{row.opponent}</td>
+                            <td>
+                              <span className="player-history-modal__branch-tag">{row.branchLabel}</span>
+                            </td>
+                            <td className="player-history-modal__cell--status">
+                              <span className={participationKindBadgeClass(row.kind)}>
+                                {participationKindLabelSv(row.kind)}
+                              </span>
+                            </td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
                 </div>
-                <div className="modal-sheet__actions">
+                <div className="modal-sheet__actions modal-sheet__actions--player-history">
                   <button type="button" className="btn btn--secondary" onClick={() => setOverviewHistoryPlayerId(null)}>
                     Stäng
                   </button>
