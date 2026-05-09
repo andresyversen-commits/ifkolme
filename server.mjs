@@ -22,6 +22,7 @@ import {
   inferIntendedGroup2015,
   inferIntendedGroup2016,
   isPlayerAvailable,
+  matchUnavailablePlayerIdSet,
   matchSquadMode,
   p11Assist2016Count,
   stripLegacyP10SquadsIfNeeded,
@@ -472,6 +473,7 @@ function initialMatches() {
     selectedPlayerIds: [],
     selectedPlayers: [],
     declinedPlayerIds: [],
+    unavailablePlayerIds: [],
     intendedGroup2015: null,
     group2015: null,
     intendedGroup2016: null,
@@ -666,6 +668,7 @@ function normalizeMatchReportPayload(raw) {
 function playerCountsAsPlayedInMatch(m, playerId, state) {
   if (!m.selectedPlayerIds?.includes(playerId)) return false;
   if (Array.isArray(m.declinedPlayerIds) && m.declinedPlayerIds.includes(playerId)) return false;
+  if (matchUnavailablePlayerIdSet(m).has(playerId)) return false;
   const pl = state.players.find((x) => x.id === playerId);
   if (!pl || !isEligibleForMatchSquad(pl)) return false;
   if (!isPlayerAvailable(pl)) return false;
@@ -733,6 +736,16 @@ function migrateStateShape(data) {
       const normalizedDeclines = [...new Set(m.declinedPlayerIds.map((id) => String(id || "").trim()).filter(Boolean))];
       if (JSON.stringify(normalizedDeclines) !== JSON.stringify(m.declinedPlayerIds)) {
         m.declinedPlayerIds = normalizedDeclines;
+        dirty = true;
+      }
+    }
+    if (!Array.isArray(m.unavailablePlayerIds)) {
+      m.unavailablePlayerIds = [];
+      dirty = true;
+    } else {
+      const normalizedUnavail = [...new Set(m.unavailablePlayerIds.map((id) => String(id || "").trim()).filter(Boolean))];
+      if (JSON.stringify(normalizedUnavail) !== JSON.stringify(m.unavailablePlayerIds)) {
+        m.unavailablePlayerIds = normalizedUnavail;
         dirty = true;
       }
     }
@@ -1627,6 +1640,29 @@ app.put("/api/matches/:id/decline", async (req, res) => {
   res.json(jsonState(state));
 });
 
+/** Frånvaro (sjuk m.m.) bara för denna match — påverkar inte nästa match. */
+app.put("/api/matches/:id/unavailable", async (req, res) => {
+  const state = await readState();
+  const match = state.matches.find((m) => m.id === req.params.id);
+  if (!match) return res.status(404).json({ error: "Match hittades inte" });
+  if (match.status === "played") return res.status(400).json({ error: "Matchen är redan genomförd" });
+  const playerId = String(req.body?.playerId || "").trim();
+  if (!playerId) return res.status(400).json({ error: "Spelar-ID saknas" });
+  const pl = state.players.find((p) => p.id === playerId);
+  if (!pl) return res.status(404).json({ error: "Spelaren hittades inte" });
+  const unavailable = Boolean(req.body?.unavailable);
+  if (!Array.isArray(match.unavailablePlayerIds)) match.unavailablePlayerIds = [];
+  const set = new Set(match.unavailablePlayerIds);
+  if (unavailable) {
+    set.add(playerId);
+  } else {
+    set.delete(playerId);
+  }
+  match.unavailablePlayerIds = [...set];
+  await writeState(state);
+  res.json(jsonState(state));
+});
+
 /** Ångra match — tar bort genomförd status, återställer rotation utifrån kvarvarande matcher, uppdaterar statistik. */
 app.post("/api/matches/:id/reopen", async (req, res) => {
   const state = await readState();
@@ -1638,6 +1674,7 @@ app.post("/api/matches/:id/reopen", async (req, res) => {
   match.intendedGroup2016 = null;
   match.selectionExplanation = null;
   match.matchReport = null;
+  match.unavailablePlayerIds = [];
   reconcilePlayerStats(state);
   await writeState(state);
   res.json(jsonState(state));
@@ -1730,6 +1767,7 @@ app.post("/api/reset-season", async (_req, res) => {
     m.status = "not_played";
     m.selectedPlayerIds = [];
     m.declinedPlayerIds = [];
+    m.unavailablePlayerIds = [];
     m.intendedGroup2015 = null;
     m.intendedGroup2016 = null;
     m.selectionExplanation = null;

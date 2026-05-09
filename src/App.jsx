@@ -12,6 +12,8 @@ import {
   compareMatchesChronologically,
   playerCountsAsPlayedInMatchForTeamScope,
   playerMatchParticipationKind,
+  isPlayerSelectableForMatch,
+  matchUnavailablePlayerIdSet,
 } from "../selection.mjs";
 
 const PROD_API_FALLBACK = "https://ifkolme-production.up.railway.app";
@@ -1076,10 +1078,15 @@ function MatchLineupNames({
   playerIds,
   players,
   declinedPlayerIds = [],
+  unavailablePlayerIds = [],
   canToggleAvailability = false,
   onAttendanceAction,
 }) {
   const declinedSet = useMemo(() => new Set(declinedPlayerIds || []), [declinedPlayerIds]);
+  const unavailableSet = useMemo(
+    () => matchUnavailablePlayerIdSet({ unavailablePlayerIds }),
+    [unavailablePlayerIds],
+  );
   const rows = useMemo(() => {
     return [...playerIds]
       .map((id) => players.find((p) => p.id === id))
@@ -1098,8 +1105,12 @@ function MatchLineupNames({
           <span className="lineup-list__name">
             {p.name}
             {p.available === false ? (
-              <span className="lineup-list__status" title="Global frånvaro">
+              <span className="lineup-list__status" title="Frånvaro för hela säsongen (spelarlistan)">
                 {p.unavailableReason === "other" ? "Ej tillgänglig" : "Sjuk / frånvaro"}
+              </span>
+            ) : unavailableSet.has(p.id) ? (
+              <span className="lineup-list__status" title="Frånvaro endast denna match">
+                Sjuk / frånvaro (matchen)
               </span>
             ) : null}
             {declinedSet.has(p.id) && p.available !== false ? (
@@ -1111,7 +1122,7 @@ function MatchLineupNames({
           <span className="lineup-list__year">{p.birthYear}</span>
           {canToggleAvailability ? (
             <span className="lineup-list__actions lineup-list__availability-btn">
-              {p.available === false ? (
+              {p.available === false || unavailableSet.has(p.id) ? (
                 <button
                   type="button"
                   className="btn btn--sm btn--secondary"
@@ -1699,8 +1710,8 @@ function MatchCard({
       if (a.birthYear !== b.birthYear) return a.birthYear - b.birthYear;
       return a.name.localeCompare(b.name, "sv");
     });
-  const selectedRows = selectedRowsAll.filter((p) => p.available !== false);
-  const sickInSquadRows = selectedRowsAll.filter((p) => p.available === false);
+  const selectedRows = selectedRowsAll.filter((p) => isPlayerSelectableForMatch(p, m));
+  const sickInSquadRows = selectedRowsAll.filter((p) => !isPlayerSelectableForMatch(p, m));
   const declinedRows = declinedPlayerIds
     .map((id) => state.players.find((p) => p.id === id))
     .filter(Boolean)
@@ -1809,9 +1820,9 @@ function MatchCard({
     setErr("");
     try {
       if (kind === "sick") {
-        await api(`/api/players/${player.id}`, {
+        await api(`/api/matches/${m.id}/unavailable`, {
           method: "PUT",
-          body: { available: false, unavailableReason: "sick" },
+          body: { playerId: player.id, unavailable: true },
         });
         if (
           m.status !== "played" &&
@@ -1819,7 +1830,7 @@ function MatchCard({
           m.selectedPlayerIds.includes(player.id)
         ) {
           const wantsReplacement = confirm(
-            `${player.name} markerades som sjuk/frånvarande. Vill du uppdatera laget automatiskt med nästa i kön nu?`,
+            `${player.name} markerades som sjuk/frånvarande för denna match. Vill du uppdatera laget automatiskt med nästa i kön nu?`,
           );
           if (wantsReplacement) {
             await api(`/api/matches/${m.id}/select`, { method: "POST" });
@@ -1832,6 +1843,10 @@ function MatchCard({
           body: { playerId: player.id, declined: true },
         });
       } else if (kind === "clear_sick") {
+        await api(`/api/matches/${m.id}/unavailable`, {
+          method: "PUT",
+          body: { playerId: player.id, unavailable: false },
+        });
         await api(`/api/players/${player.id}`, {
           method: "PUT",
           body: { available: true },
@@ -1991,6 +2006,7 @@ function MatchCard({
               playerIds={m.selectedPlayerIds}
               players={state.players}
               declinedPlayerIds={declinedPlayerIds}
+              unavailablePlayerIds={m.unavailablePlayerIds}
               canToggleAvailability={m.status !== "played"}
               onAttendanceAction={(p, kind) => {
                 handleAttendanceAction(p, kind).catch(() => null);
@@ -2418,7 +2434,7 @@ function MatchCard({
                 if (on && rotationView?.canonical2015Ids?.length) {
                   const avail = rotationView.canonical2015Ids.filter((id) => {
                     const pl = players2015.find((x) => x.id === id);
-                    return pl && pl.available !== false;
+                    return pl && isPlayerSelectableForMatch(pl, m);
                   });
                   setManualIds(avail.length ? [...avail] : []);
                 } else if (!on) {
@@ -2434,21 +2450,24 @@ function MatchCard({
                 <label
                   key={p.id}
                   className="cb-row"
-                  style={{ cursor: p.available === false ? "not-allowed" : "pointer", opacity: p.available === false ? 0.45 : 1 }}
+                  style={{
+                    cursor: !isPlayerSelectableForMatch(p, m) ? "not-allowed" : "pointer",
+                    opacity: !isPlayerSelectableForMatch(p, m) ? 0.45 : 1,
+                  }}
                 >
                   <input
                     type="checkbox"
                     checked={manualIds.includes(p.id)}
-                    disabled={p.available === false || (!manualIds.includes(p.id) && atLimit)}
+                    disabled={!isPlayerSelectableForMatch(p, m) || (!manualIds.includes(p.id) && atLimit)}
                     onChange={() => {
-                      if (p.available === false) return;
+                      if (!isPlayerSelectableForMatch(p, m)) return;
                       toggle2015(p.id);
                     }}
                   />
                   <span>
                     {p.name}{" "}
                     <span style={{ color: "var(--text-secondary)" }}>({p.birthYear})</span>
-                    {p.available === false && (
+                    {!isPlayerSelectableForMatch(p, m) && (
                       <span style={{ color: "var(--danger)", fontSize: 13 }}> · Ej tillgänglig</span>
                     )}
                   </span>
@@ -2469,7 +2488,7 @@ function MatchCard({
                 const on = e.target.checked;
                 setShowManual2016(on);
                 if (on) {
-                  const avail = players2016.filter((pl) => pl.available !== false).map((pl) => pl.id);
+                  const avail = players2016.filter((pl) => isPlayerSelectableForMatch(pl, m)).map((pl) => pl.id);
                   const canon = (rotationView?.canonical2016Ids || []).filter((id) => avail.includes(id));
                   const rest = avail
                     .filter((id) => !canon.includes(id))
@@ -2491,24 +2510,27 @@ function MatchCard({
                 <label
                   key={p.id}
                   className="cb-row"
-                  style={{ cursor: p.available === false ? "not-allowed" : "pointer", opacity: p.available === false ? 0.45 : 1 }}
+                  style={{
+                    cursor: !isPlayerSelectableForMatch(p, m) ? "not-allowed" : "pointer",
+                    opacity: !isPlayerSelectableForMatch(p, m) ? 0.45 : 1,
+                  }}
                 >
                   <input
                     type="checkbox"
                     checked={manual2016Ids.includes(p.id)}
                     disabled={
-                      p.available === false ||
+                      !isPlayerSelectableForMatch(p, m) ||
                       (!manual2016Ids.includes(p.id) && manual2016Ids.length >= assist2016Target)
                     }
                     onChange={() => {
-                      if (p.available === false) return;
+                      if (!isPlayerSelectableForMatch(p, m)) return;
                       toggle2016(p.id);
                     }}
                   />
                   <span>
                     {p.name}{" "}
                     <span style={{ color: "var(--text-secondary)" }}>({p.birthYear})</span>
-                    {p.available === false && (
+                    {!isPlayerSelectableForMatch(p, m) && (
                       <span style={{ color: "var(--danger)", fontSize: 13 }}> · Ej tillgänglig</span>
                     )}
                   </span>
@@ -2853,14 +2875,14 @@ export default function App() {
           if (!["p10", "club", "2014", "2015", "2016"].includes(ob)) ob = "p10";
           setOverviewTeam(ob === "club" ? "both" : "p10");
         }
-        if (parsedUi?.overviewPlayerYear && ["all", "2015", "2016"].includes(parsedUi.overviewPlayerYear)) {
-          setOverviewPlayerYear(parsedUi.overviewPlayerYear);
-        } else if (parsedUi?.overviewPlayerYear === "2014") {
-          setOverviewPlayerYear("2015");
-        } else if (parsedUi?.overviewBirth && ["2015", "2016"].includes(parsedUi.overviewBirth)) {
-          setOverviewPlayerYear(parsedUi.overviewBirth);
-        } else if (parsedUi?.overviewBirth === "2014") {
-          setOverviewPlayerYear("2015");
+        const rawYearFilter = parsedUi?.overviewPlayerYear ?? parsedUi?.overviewBirth;
+        if (rawYearFilter != null && rawYearFilter !== "") {
+          let yf =
+            typeof rawYearFilter === "number" && Number.isFinite(rawYearFilter)
+              ? String(Math.trunc(rawYearFilter))
+              : String(rawYearFilter).trim();
+          if (yf === "2014") yf = "2015";
+          if (["all", "2015", "2016"].includes(yf)) setOverviewPlayerYear(yf);
         }
         if (parsedUi?.activeMatchId) setActiveMatchId(parsedUi.activeMatchId);
         if (parsedUi?.matchListScope && ["upcoming", "played", "all"].includes(parsedUi.matchListScope)) {
@@ -3075,14 +3097,17 @@ export default function App() {
     });
   }, [state?.players, overviewScopeStats]);
 
+  const overviewPlayerYearNorm = ["all", "2015", "2016"].includes(overviewPlayerYear) ? overviewPlayerYear : "all";
+
   const playersAfterBirthFilter = useMemo(() => {
     return playersSortedForOverview.filter((p) => {
       const y = birthYearNum(p);
-      if (overviewPlayerYear === "all") return true;
-      if (overviewPlayerYear === "2015") return y === 2014 || y === 2015;
-      return y === 2016;
+      if (overviewPlayerYearNorm === "all") return true;
+      if (overviewPlayerYearNorm === "2015") return y === 2014 || y === 2015;
+      if (overviewPlayerYearNorm === "2016") return y === 2016;
+      return true;
     });
-  }, [playersSortedForOverview, overviewPlayerYear]);
+  }, [playersSortedForOverview, overviewPlayerYearNorm]);
 
   const playersOverview = playersAfterBirthFilter;
 
@@ -3684,7 +3709,8 @@ export default function App() {
           <h2 className="panel__title">Spelargrupp</h2>
           <p className="panel__lead">
             Spelare, grupper A/B/C för födda 2015 och 2016 (rotation). Födda 2014 följer automatiskt med i P 11-trupp;
-            de ingår inte i P 10-matchtrupp. P 10: tre 2015 + alla tillgängliga 2016. Frånvaro: markera ej tillgänglig.
+            de ingår inte i P 10-matchtrupp. P 10: tre 2015 + alla tillgängliga 2016. Frånvaro per match (sjuk) ställs
+            under <strong>Matcher → Trupp</strong>; längre frånvaro ändras här under <strong>Spelare</strong>.
           </p>
 
           {rotationView && rotationView.groupsValid === false && (
@@ -4446,10 +4472,10 @@ export default function App() {
               : <strong>{overviewScopeStats.matchesPlayed}</strong> / {overviewScopeStats.matchesTotal}
             </span>
             <span>
-              Visar <strong>{playersOverview.length}</strong> av <strong>{playersAfterBirthFilter.length}</strong> spelare
-              {overviewPlayerYear === "2015"
+              Visar <strong>{playersOverview.length}</strong> av <strong>{playersSortedForOverview.length}</strong> spelare
+              {overviewPlayerYearNorm === "2015"
                 ? " födda 2014 eller 2015"
-                : overviewPlayerYear === "2016"
+                : overviewPlayerYearNorm === "2016"
                   ? " födda 2016"
                   : ""}
             </span>
@@ -4496,7 +4522,7 @@ export default function App() {
                   key={o.id}
                   type="button"
                   className="segmented__btn"
-                  aria-selected={overviewPlayerYear === o.id}
+                  aria-selected={overviewPlayerYearNorm === o.id}
                   onClick={() => setOverviewPlayerYear(o.id)}
                 >
                   {o.label}

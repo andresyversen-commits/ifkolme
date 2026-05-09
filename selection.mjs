@@ -16,6 +16,7 @@
  * TILLGÄNGLIGHET
  * ---------------
  * Spelare med available === false tas aldrig med i automatisk 2015- eller 2016-urval.
+ * Dessutom: unavailablePlayerIds på en match — frånvaro bara för den matchen (truppfliken).
  * Saknas tillräckligt många tillgängliga 2015-spelare kastas fel (tränaren måste
  * justera tillgänglighet eller grupper).
  *
@@ -73,6 +74,7 @@ export function playerCountsAsPlayedInMatchForTeamScope(m, playerId, state, team
   if (teamScope === "p11" && br !== "p11") return false;
   if (!m.selectedPlayerIds?.includes(playerId)) return false;
   if (Array.isArray(m.declinedPlayerIds) && m.declinedPlayerIds.includes(playerId)) return false;
+  if (matchUnavailablePlayerIdSet(m).has(playerId)) return false;
   const pl = state.players.find((x) => x.id === playerId);
   if (!pl || !isPlayerAvailable(pl)) return false;
   if (br === "p11") return isAllowedP11SquadPlayer(pl);
@@ -89,6 +91,7 @@ export function playerMatchParticipationKind(match, playerId, state) {
   const inSquad = Array.isArray(match.selectedPlayerIds) && match.selectedPlayerIds.includes(playerId);
   if (!inSquad) return "not_in_squad";
   if (match.status !== "played") return "squad_pending";
+  if (matchUnavailablePlayerIdSet(match).has(playerId)) return "squad_unavailable_played";
   if (!isPlayerAvailable(pl)) return "squad_unavailable_played";
   const br = matchBranchKey(match);
   const eligible = br === "p11" ? isAllowedP11SquadPlayer(pl) : isEligibleForMatchSquad(pl);
@@ -135,6 +138,31 @@ export function repairP11Squad2014IfNeeded(state) {
 
 export function isPlayerAvailable(p) {
   return p && p.available !== false;
+}
+
+/** Spelare markerade sjuka/frånvarande bara för denna match (truppfliken). */
+export function matchUnavailablePlayerIdSet(match) {
+  const raw = Array.isArray(match?.unavailablePlayerIds) ? match.unavailablePlayerIds : [];
+  return new Set(raw.map((id) => String(id || "").trim()).filter(Boolean));
+}
+
+/** Sant om spelaren inte får tas ut i lag för denna match (global frånvaro eller match-lista). */
+export function isPlayerUnavailableForThisMatch(p, match) {
+  if (!p || !isPlayerAvailable(p)) return true;
+  if (!match) return false;
+  return matchUnavailablePlayerIdSet(match).has(p.id);
+}
+
+export function isPlayerSelectableForMatch(p, match) {
+  return !isPlayerUnavailableForThisMatch(p, match);
+}
+
+function pruneMatchUnavailableToSquad(match) {
+  const sel = new Set(match.selectedPlayerIds || []);
+  const arr = Array.isArray(match.unavailablePlayerIds) ? match.unavailablePlayerIds : [];
+  match.unavailablePlayerIds = [...new Set(arr.map((id) => String(id || "").trim()).filter(Boolean))].filter((id) =>
+    sel.has(id),
+  );
 }
 
 /** PRNG med fast frö — reproducerbar säsongssimulering. */
@@ -377,12 +405,12 @@ function attachRandomTieKeys(players, rng) {
  * därefter övriga tillgängliga 2015 sorterade efter minst matcher, slump vid lika,
  * undvik senast spelade 2015 om möjligt.
  */
-export function fill2015Lineup(state, seedIds, rng) {
+export function fill2015Lineup(state, seedIds, rng, match = null) {
   repairGroups2015IfNeeded(state);
   const chosen = [...new Set(seedIds)].filter(Boolean);
   for (const id of chosen) {
     const pl = state.players.find((p) => p.id === id);
-    if (!pl || birthYearNum(pl) !== 2015 || !isPlayerAvailable(pl)) throw new Error("invalid_2015_pick");
+    if (!pl || birthYearNum(pl) !== 2015 || !isPlayerSelectableForMatch(pl, match)) throw new Error("invalid_2015_pick");
   }
   if (chosen.length > MAX_2015_ON_FIELD) throw new Error("max_2015_exceeded");
 
@@ -390,7 +418,7 @@ export function fill2015Lineup(state, seedIds, rng) {
   const prev2015 = getLastPlayed2015Ids(state.matches, state.players);
   while (out.length < MAX_2015_ON_FIELD) {
     const pool = state.players.filter(
-      (p) => birthYearNum(p) === 2015 && isPlayerAvailable(p) && !out.includes(p.id)
+      (p) => birthYearNum(p) === 2015 && isPlayerSelectableForMatch(p, match) && !out.includes(p.id)
     );
     if (!pool.length) throw new Error("cannot_field_three_2015");
     const withTie = attachRandomTieKeys(pool, rng);
@@ -410,12 +438,12 @@ export function fill2015Lineup(state, seedIds, rng) {
  * Fyller upp till `targetCount` platser med födda 2016: först seed, sedan kö
  * (minst matcher spelade, undvik senast spelade 2016 om möjligt, slump vid lika).
  */
-export function fill2016Lineup(state, seedIds, targetCount, rng) {
+export function fill2016Lineup(state, seedIds, targetCount, rng, match = null) {
   repairGroups2016IfNeeded(state);
   const chosen = [...new Set(seedIds)].filter(Boolean);
   for (const id of chosen) {
     const pl = state.players.find((p) => p.id === id);
-    if (!pl || birthYearNum(pl) !== 2016 || !isPlayerAvailable(pl)) throw new Error("invalid_2016_pick");
+    if (!pl || birthYearNum(pl) !== 2016 || !isPlayerSelectableForMatch(pl, match)) throw new Error("invalid_2016_pick");
   }
   if (chosen.length > targetCount) throw new Error("max_2016_exceeded");
 
@@ -423,7 +451,7 @@ export function fill2016Lineup(state, seedIds, targetCount, rng) {
   const prev2016 = getLastPlayed2016Ids(state.matches, state.players);
   while (out.length < targetCount) {
     const pool = state.players.filter(
-      (p) => birthYearNum(p) === 2016 && isPlayerAvailable(p) && !out.includes(p.id),
+      (p) => birthYearNum(p) === 2016 && isPlayerSelectableForMatch(p, match) && !out.includes(p.id),
     );
     if (!pool.length) throw new Error("cannot_field_2016_assist");
     const withTie = attachRandomTieKeys(pool, rng);
@@ -455,8 +483,8 @@ function randomPickIds(ids, count, rng) {
  * - Vid lika: den som spelade längst sedan (eller aldrig spelat) först.
  * - Därefter minst totala matcher, sedan slump vid exakt lika.
  */
-function pickNext2016AssistIds(state, nAssist, rng) {
-  const eligible = state.players.filter((p) => birthYearNum(p) === 2016 && isPlayerAvailable(p));
+function pickNext2016AssistIds(state, nAssist, rng, match = null) {
+  const eligible = state.players.filter((p) => birthYearNum(p) === 2016 && isPlayerSelectableForMatch(p, match));
   if (eligible.length < nAssist) throw new Error("cannot_field_2016_assist");
 
   const assistCount = new Map();
@@ -490,26 +518,26 @@ function pickNext2016AssistIds(state, nAssist, rng) {
   return withTie.slice(0, nAssist).map((p) => p.id);
 }
 
-export function validateOverride2016(state, overrideIds, exactCount) {
+export function validateOverride2016(state, overrideIds, exactCount, match = null) {
   if (!overrideIds?.length) return null;
   const uniq = [...new Set(overrideIds)];
   if (exactCount != null && uniq.length !== exactCount) throw new Error("override_2016_wrong_count");
   for (const id of uniq) {
     const pl = state.players.find((p) => p.id === id);
     if (!pl || birthYearNum(pl) !== 2016) throw new Error("override_invalid_2016");
-    if (!isPlayerAvailable(pl)) throw new Error("player_unavailable");
+    if (!isPlayerSelectableForMatch(pl, match)) throw new Error("player_unavailable");
   }
   return uniq;
 }
 
-export function validateOverride2015(state, overrideIds, max = MAX_2015_ON_FIELD) {
+export function validateOverride2015(state, overrideIds, max = MAX_2015_ON_FIELD, match = null) {
   if (!overrideIds?.length) return null;
   const uniq = [...new Set(overrideIds)];
   if (uniq.length > max) throw new Error("override_too_many_2015");
   for (const id of uniq) {
     const pl = state.players.find((p) => p.id === id);
     if (!pl || birthYearNum(pl) !== 2015) throw new Error("override_invalid_2015");
-    if (!isPlayerAvailable(pl)) throw new Error("player_unavailable");
+    if (!isPlayerSelectableForMatch(pl, match)) throw new Error("player_unavailable");
   }
   return uniq;
 }
@@ -562,9 +590,9 @@ export function matchSquadMode(match) {
   return "mixed";
 }
 
-function sortedAvailableIdsByYear(state, year) {
+function sortedAvailableIdsByYear(state, year, match = null) {
   return state.players
-    .filter((p) => birthYearNum(p) === year && isPlayerAvailable(p))
+    .filter((p) => birthYearNum(p) === year && isPlayerSelectableForMatch(p, match))
     .sort((a, b) => a.name.localeCompare(b.name, "sv"))
     .map((p) => p.id);
 }
@@ -593,7 +621,7 @@ export function selectTeamForMatch(state, matchId, opts = {}) {
     const nAssist = p11Assist2016Count(match, state);
     if (nAssist <= 0) throw new Error("p11_assist_zero");
 
-    const ids2015 = sortedAvailableIdsByYear(state, 2015);
+    const ids2015 = sortedAvailableIdsByYear(state, 2015, match);
     if (!ids2015.length) throw new Error("no_available_2015");
 
     const scheduledGroup2015 = computeNextGroup2015(state);
@@ -602,15 +630,16 @@ export function selectTeamForMatch(state, matchId, opts = {}) {
     let ids2016Pick;
     let used2016Override = false;
     if (opts.override2016PlayerIds?.length) {
-      ids2016Pick = validateOverride2016(state, opts.override2016PlayerIds, nAssist);
+      ids2016Pick = validateOverride2016(state, opts.override2016PlayerIds, nAssist, match);
       used2016Override = true;
     } else {
-      ids2016Pick = pickNext2016AssistIds(state, nAssist, rng);
+      ids2016Pick = pickNext2016AssistIds(state, nAssist, rng, match);
     }
 
     match.intendedGroup2015 = scheduledGroup2015;
     match.intendedGroup2016 = inferIntendedGroup2016(state.groups2016, ids2016Pick);
     match.selectedPlayerIds = appendP11Bench2014Players(state, [...ids2015, ...ids2016Pick]);
+    pruneMatchUnavailableToSquad(match);
 
     const g15 = groupLabel(scheduledGroup2015);
     const g16 = groupLabel(match.intendedGroup2016);
@@ -633,12 +662,13 @@ export function selectTeamForMatch(state, matchId, opts = {}) {
     if (opts.override2015PlayerIds?.length) {
       // Ignoreras — P11 utan assist tar alltid alla tillgängliga 2015.
     }
-    const ids = sortedAvailableIdsByYear(state, 2015);
+    const ids = sortedAvailableIdsByYear(state, 2015, match);
     if (!ids.length) throw new Error("no_available_2015");
     const scheduledGroup = computeNextGroup2015(state);
     match.intendedGroup2015 = scheduledGroup;
     match.intendedGroup2016 = null;
     match.selectedPlayerIds = appendP11Bench2014Players(state, [...ids]);
+    pruneMatchUnavailableToSquad(match);
     const gLabel = groupLabel(scheduledGroup);
     const text2015 = `P 11-serie: alla tillgängliga spelare födda 2015 tas ut. Omgången räknas i rotation som ${gLabel}.`;
     const text2016 = "P 11-serie: inga spelare födda 2016 tas ut i den här matchen.";
@@ -652,22 +682,23 @@ export function selectTeamForMatch(state, matchId, opts = {}) {
   let seed2015;
   let usedOverride = false;
   if (opts.override2015PlayerIds?.length) {
-    seed2015 = validateOverride2015(state, opts.override2015PlayerIds);
+    seed2015 = validateOverride2015(state, opts.override2015PlayerIds, MAX_2015_ON_FIELD, match);
     usedOverride = true;
   } else {
     seed2015 = canonicalIds.filter((id) => {
       const pl = state.players.find((p) => p.id === id);
-      return isPlayerAvailable(pl) && isEligibleForMatchSquad(pl);
+      return isPlayerSelectableForMatch(pl, match) && isEligibleForMatchSquad(pl);
     });
   }
 
-  const ids2015 = fill2015Lineup(state, seed2015, rng);
-  const ids2016 = sortedAvailableIdsByYear(state, 2016);
+  const ids2015 = fill2015Lineup(state, seed2015, rng, match);
+  const ids2016 = sortedAvailableIdsByYear(state, 2016, match);
   if (!ids2016.length) throw new Error("no_available_2016");
 
   match.intendedGroup2015 = scheduledGroup;
   match.intendedGroup2016 = null;
   match.selectedPlayerIds = [...ids2015, ...ids2016];
+  pruneMatchUnavailableToSquad(match);
 
   const gLabel = groupLabel(scheduledGroup);
   const text2015 = usedOverride
@@ -691,6 +722,7 @@ export function simulateFullSeason(state) {
   for (const m of clone.matches) {
     m.status = "not_played";
     m.selectedPlayerIds = [];
+    m.unavailablePlayerIds = [];
     m.intendedGroup2015 = null;
     m.intendedGroup2016 = null;
     m.selectionExplanation = null;
