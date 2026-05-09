@@ -1588,25 +1588,30 @@ function MatchCard({
     };
     setFormationDraft(formation);
     const slots = buildOutfieldSlots(formation);
+    const squad = new Set(
+      (m.selectedPlayerIds || []).map((id) => String(id ?? "").trim()).filter(Boolean),
+    );
     const next = {};
-    for (const p of (m.selectedPlayerIds || []).map((id) => state.players.find((x) => x.id === id)).filter(Boolean)) {
-      next[p.id] = "bench";
+    for (const sid of squad) {
+      const p = state.players.find((x) => String(x?.id ?? "") === sid);
+      if (p) next[sid] = "bench";
     }
     for (const row of m.lineup?.starters || []) {
-      if (!row?.playerId) continue;
+      const pid = String(row?.playerId ?? "").trim();
+      if (!pid || !squad.has(pid)) continue;
       if (row.role === "goalkeeper") {
-        next[row.playerId] = "gk";
+        next[pid] = "gk";
         continue;
       }
       const slot = slots.find((s) => s.role === row.role && Number(s.order) === Number(row.order));
-      if (slot) next[row.playerId] = slot.key;
+      if (slot) next[pid] = slot.key;
     }
     setPositionDraftByPlayer(next);
     const nextSubs = {};
     for (const row of m.lineup?.substitutions || []) {
-      const inId = String(row?.inPlayerId || "");
-      const outId = String(row?.outPlayerId || "");
-      if (inId && outId) nextSubs[inId] = outId;
+      const inId = String(row?.inPlayerId || "").trim();
+      const outId = String(row?.outPlayerId || "").trim();
+      if (inId && outId && squad.has(inId) && squad.has(outId)) nextSubs[inId] = outId;
     }
     setSubstitutionDraftByInPlayer(nextSubs);
   }, [m.id, m.lineup, m.selectedPlayerIds, state.players]);
@@ -1703,13 +1708,23 @@ function MatchCard({
   const matchNo = displayNumber ?? m.number;
   const declinedPlayerIds = Array.isArray(m.declinedPlayerIds) ? m.declinedPlayerIds : [];
   const declinedSet = new Set(declinedPlayerIds);
-  const selectedRowsAll = m.selectedPlayerIds
-    .map((id) => state.players.find((p) => p.id === id))
-    .filter(Boolean)
-    .sort((a, b) => {
-      if (a.birthYear !== b.birthYear) return a.birthYear - b.birthYear;
-      return a.name.localeCompare(b.name, "sv");
-    });
+  const selectedRowsAll = useMemo(() => {
+    const seen = new Set();
+    const ordered = [];
+    for (const raw of m.selectedPlayerIds || []) {
+      const sid = String(raw ?? "").trim();
+      if (!sid || seen.has(sid)) continue;
+      seen.add(sid);
+      ordered.push(sid);
+    }
+    return ordered
+      .map((sid) => state.players.find((p) => String(p?.id ?? "") === sid))
+      .filter(Boolean)
+      .sort((a, b) => {
+        if (a.birthYear !== b.birthYear) return a.birthYear - b.birthYear;
+        return a.name.localeCompare(b.name, "sv");
+      });
+  }, [m.selectedPlayerIds, state.players]);
   const selectedRows = selectedRowsAll.filter((p) => isPlayerSelectableForMatch(p, m));
   const sickInSquadRows = selectedRowsAll.filter((p) => !isPlayerSelectableForMatch(p, m));
   const declinedRows = declinedPlayerIds
@@ -1721,14 +1736,15 @@ function MatchCard({
       return a.name.localeCompare(b.name, "sv");
     });
   const outfieldSlots = useMemo(() => buildOutfieldSlots(formationDraft), [formationDraft]);
-  const selectedLineupIds = useMemo(() => new Set(selectedRows.map((p) => p.id)), [selectedRows]);
+  const selectedLineupIds = useMemo(() => new Set(selectedRows.map((p) => String(p?.id ?? ""))), [selectedRows]);
   const formationTotal = Number(formationDraft.defenders || 0) + Number(formationDraft.midfielders || 0) + Number(formationDraft.attackers || 0);
   const slotToPlayer = useMemo(() => {
     const map = {};
     for (const [playerId, slotKey] of Object.entries(positionDraftByPlayer || {})) {
-      if (!selectedLineupIds.has(playerId)) continue;
+      const pid = String(playerId ?? "").trim();
+      if (!selectedLineupIds.has(pid)) continue;
       if (!slotKey || slotKey === "bench") continue;
-      if (!map[slotKey]) map[slotKey] = playerId;
+      if (!map[slotKey]) map[slotKey] = pid;
     }
     return map;
   }, [positionDraftByPlayer, selectedLineupIds]);
@@ -1741,11 +1757,11 @@ function MatchCard({
   );
   const selectedById = useMemo(() => {
     const map = new Map();
-    for (const p of selectedRows) map.set(p.id, p);
+    for (const p of selectedRows) map.set(String(p.id), p);
     return map;
   }, [selectedRows]);
   const benchPlayers = useMemo(
-    () => selectedRows.filter((p) => (positionDraftByPlayer[p.id] || "bench") === "bench"),
+    () => selectedRows.filter((p) => (positionDraftByPlayer[String(p.id)] || "bench") === "bench"),
     [selectedRows, positionDraftByPlayer],
   );
   const starterPlayers = useMemo(() => {
@@ -1753,20 +1769,21 @@ function MatchCard({
     return ids.map((id) => selectedById.get(id)).filter(Boolean);
   }, [slotToPlayer, outfieldSlots, selectedById]);
   const substitutionOutIds = benchPlayers
-    .map((p) => String(substitutionDraftByInPlayer[p.id] || ""))
+    .map((p) => String(substitutionDraftByInPlayer[String(p.id)] || ""))
     .filter(Boolean);
   const substitutionsUnique = new Set(substitutionOutIds).size === substitutionOutIds.length;
   const plannedBenchByInId = useMemo(() => {
     const map = new Map();
     for (const bench of benchPlayers) {
-      const outId = String(substitutionDraftByInPlayer[bench.id] || "");
+      const bid = String(bench.id);
+      const outId = String(substitutionDraftByInPlayer[bid] || "");
       if (!outId) continue;
-      map.set(bench.id, outId);
+      map.set(bid, outId);
     }
     return map;
   }, [benchPlayers, substitutionDraftByInPlayer]);
-  const plannedBenchPlayers = benchPlayers.filter((p) => plannedBenchByInId.has(p.id));
-  const unassignedBenchPlayers = benchPlayers.filter((p) => !plannedBenchByInId.has(p.id));
+  const plannedBenchPlayers = benchPlayers.filter((p) => plannedBenchByInId.has(String(p.id)));
+  const unassignedBenchPlayers = benchPlayers.filter((p) => !plannedBenchByInId.has(String(p.id)));
 
   const names2015 = selectedRowsAll.filter((p) => birthYearNum(p) === 2015).map((p) => p.name);
   const names2016 = selectedRowsAll.filter((p) => birthYearNum(p) === 2016).map((p) => p.name);
@@ -2079,11 +2096,11 @@ function MatchCard({
                       </span>
                       <select
                         className="field__select"
-                        value={positionDraftByPlayer[p.id] || "bench"}
+                        value={positionDraftByPlayer[String(p.id)] || "bench"}
                         onChange={(e) =>
                           setPositionDraftByPlayer((prev) => ({
                             ...prev,
-                            [p.id]: e.target.value,
+                            [String(p.id)]: e.target.value,
                           }))
                         }
                       >
@@ -2114,11 +2131,11 @@ function MatchCard({
                         </span>
                         <select
                           className="field__select"
-                          value={substitutionDraftByInPlayer[bench.id] || ""}
+                          value={substitutionDraftByInPlayer[String(bench.id)] || ""}
                           onChange={(e) =>
                             setSubstitutionDraftByInPlayer((prev) => ({
                               ...prev,
-                              [bench.id]: e.target.value,
+                              [String(bench.id)]: e.target.value,
                             }))
                           }
                         >
@@ -2162,7 +2179,7 @@ function MatchCard({
                         const substitutions = benchPlayers
                           .map((bench, idx) => ({
                             order: idx + 1,
-                            outPlayerId: String(substitutionDraftByInPlayer[bench.id] || ""),
+                            outPlayerId: String(substitutionDraftByInPlayer[String(bench.id)] || ""),
                             inPlayerId: bench.id,
                             note: "",
                           }))
@@ -2200,7 +2217,7 @@ function MatchCard({
                       y: slot.role === "defender" ? 66 : slot.role === "midfielder" ? 48 : 30,
                     }))].map((slotNode) => {
                       const playerId = slotToPlayer[slotNode.key];
-                      const player = playerId ? selectedById.get(playerId) : null;
+                      const player = playerId ? selectedById.get(String(playerId)) : null;
                       return (
                         <div
                           key={slotNode.key}
@@ -2230,7 +2247,7 @@ function MatchCard({
                       <p className="match-card__planned-subs-title">Planerade byten</p>
                       {plannedBenchPlayers.map((bench, idx) => (
                         <p key={`${bench.id}-${idx}`} className="match-card__planned-subs-item">
-                          {bench.name} in för {playerName(plannedBenchByInId.get(bench.id))}
+                          {bench.name} in för {playerName(plannedBenchByInId.get(String(bench.id)))}
                         </p>
                       ))}
                     </div>

@@ -72,10 +72,13 @@ export function playerCountsAsPlayedInMatchForTeamScope(m, playerId, state, team
   const br = matchBranchKey(m);
   if (teamScope === "p10" && br !== "p10") return false;
   if (teamScope === "p11" && br !== "p11") return false;
-  if (!m.selectedPlayerIds?.includes(playerId)) return false;
-  if (Array.isArray(m.declinedPlayerIds) && m.declinedPlayerIds.includes(playerId)) return false;
-  if (matchUnavailablePlayerIdSet(m).has(playerId)) return false;
-  const pl = state.players.find((x) => x.id === playerId);
+  const pid = String(playerId ?? "").trim();
+  const squad = new Set((m.selectedPlayerIds || []).map((id) => String(id ?? "").trim()).filter(Boolean));
+  if (!pid || !squad.has(pid)) return false;
+  const declined = new Set((m.declinedPlayerIds || []).map((id) => String(id ?? "").trim()).filter(Boolean));
+  if (declined.has(pid)) return false;
+  if (matchUnavailablePlayerIdSet(m).has(pid)) return false;
+  const pl = state.players.find((x) => String(x?.id ?? "") === pid);
   if (!pl || !isPlayerAvailable(pl)) return false;
   if (br === "p11") return isAllowedP11SquadPlayer(pl);
   return isEligibleForMatchSquad(pl);
@@ -85,13 +88,16 @@ export function playerCountsAsPlayedInMatchForTeamScope(m, playerId, state, team
  * Deltagande per match (spelarhistorik), utan lagfilter — används i gränssnittet för alla matcher.
  */
 export function playerMatchParticipationKind(match, playerId, state) {
-  const pl = state.players.find((x) => x.id === playerId);
+  const pid = String(playerId ?? "").trim();
+  if (!pid) return "unknown";
+  const pl = state.players.find((x) => String(x?.id ?? "") === pid);
   if (!pl) return "unknown";
-  if (Array.isArray(match.declinedPlayerIds) && match.declinedPlayerIds.includes(playerId)) return "declined";
-  const inSquad = Array.isArray(match.selectedPlayerIds) && match.selectedPlayerIds.includes(playerId);
-  if (!inSquad) return "not_in_squad";
+  const declined = new Set((match.declinedPlayerIds || []).map((id) => String(id ?? "").trim()).filter(Boolean));
+  if (declined.has(pid)) return "declined";
+  const squad = new Set((match.selectedPlayerIds || []).map((id) => String(id ?? "").trim()).filter(Boolean));
+  if (!squad.has(pid)) return "not_in_squad";
   if (match.status !== "played") return "squad_pending";
-  if (matchUnavailablePlayerIdSet(match).has(playerId)) return "squad_unavailable_played";
+  if (matchUnavailablePlayerIdSet(match).has(pid)) return "squad_unavailable_played";
   if (!isPlayerAvailable(pl)) return "squad_unavailable_played";
   const br = matchBranchKey(match);
   const eligible = br === "p11" ? isAllowedP11SquadPlayer(pl) : isEligibleForMatchSquad(pl);
@@ -146,11 +152,43 @@ export function matchUnavailablePlayerIdSet(match) {
   return new Set(raw.map((id) => String(id || "").trim()).filter(Boolean));
 }
 
+/** Tar bort sparad startupp./byten som pekar på spelare utanför aktuell trupp (t.ex. efter nytt «Välj lag»). */
+export function pruneMatchLineupToSelectedSquad(match) {
+  const pool = new Set(
+    (Array.isArray(match?.selectedPlayerIds) ? match.selectedPlayerIds : [])
+      .map((id) => String(id ?? "").trim())
+      .filter(Boolean),
+  );
+  const lu = match?.lineup;
+  if (!lu || typeof lu !== "object") return false;
+  let changed = false;
+  const starters = Array.isArray(lu.starters) ? lu.starters : [];
+  const nextStarters = starters.filter((row) => pool.has(String(row?.playerId ?? "").trim()));
+  if (nextStarters.length !== starters.length) changed = true;
+  lu.starters = nextStarters;
+  const subs = Array.isArray(lu.substitutions) ? lu.substitutions : [];
+  const nextSubs = subs.filter((row) => {
+    const inId = String(row?.inPlayerId ?? "").trim();
+    const outId = String(row?.outPlayerId ?? "").trim();
+    if (inId && !pool.has(inId)) return false;
+    if (outId && !pool.has(outId)) return false;
+    return Boolean(inId || outId);
+  });
+  if (nextSubs.length !== subs.length) changed = true;
+  lu.substitutions = nextSubs;
+  if (!lu.starters.length) {
+    if (match.lineup != null) changed = true;
+    match.lineup = null;
+    return changed;
+  }
+  return changed;
+}
+
 /** Sant om spelaren inte får tas ut i lag för denna match (global frånvaro eller match-lista). */
 export function isPlayerUnavailableForThisMatch(p, match) {
   if (!p || !isPlayerAvailable(p)) return true;
   if (!match) return false;
-  return matchUnavailablePlayerIdSet(match).has(p.id);
+  return matchUnavailablePlayerIdSet(match).has(String(p.id ?? ""));
 }
 
 export function isPlayerSelectableForMatch(p, match) {
@@ -158,7 +196,11 @@ export function isPlayerSelectableForMatch(p, match) {
 }
 
 function pruneMatchUnavailableToSquad(match) {
-  const sel = new Set(match.selectedPlayerIds || []);
+  const sel = new Set(
+    (Array.isArray(match.selectedPlayerIds) ? match.selectedPlayerIds : [])
+      .map((id) => String(id ?? "").trim())
+      .filter(Boolean),
+  );
   const arr = Array.isArray(match.unavailablePlayerIds) ? match.unavailablePlayerIds : [];
   match.unavailablePlayerIds = [...new Set(arr.map((id) => String(id || "").trim()).filter(Boolean))].filter((id) =>
     sel.has(id),
@@ -640,6 +682,7 @@ export function selectTeamForMatch(state, matchId, opts = {}) {
     match.intendedGroup2016 = inferIntendedGroup2016(state.groups2016, ids2016Pick);
     match.selectedPlayerIds = appendP11Bench2014Players(state, [...ids2015, ...ids2016Pick]);
     pruneMatchUnavailableToSquad(match);
+    pruneMatchLineupToSelectedSquad(match);
 
     const g15 = groupLabel(scheduledGroup2015);
     const g16 = groupLabel(match.intendedGroup2016);
@@ -669,6 +712,7 @@ export function selectTeamForMatch(state, matchId, opts = {}) {
     match.intendedGroup2016 = null;
     match.selectedPlayerIds = appendP11Bench2014Players(state, [...ids]);
     pruneMatchUnavailableToSquad(match);
+    pruneMatchLineupToSelectedSquad(match);
     const gLabel = groupLabel(scheduledGroup);
     const text2015 = `P 11-serie: alla tillgängliga spelare födda 2015 tas ut. Omgången räknas i rotation som ${gLabel}.`;
     const text2016 = "P 11-serie: inga spelare födda 2016 tas ut i den här matchen.";
@@ -699,6 +743,7 @@ export function selectTeamForMatch(state, matchId, opts = {}) {
   match.intendedGroup2016 = null;
   match.selectedPlayerIds = [...ids2015, ...ids2016];
   pruneMatchUnavailableToSquad(match);
+  pruneMatchLineupToSelectedSquad(match);
 
   const gLabel = groupLabel(scheduledGroup);
   const text2015 = usedOverride

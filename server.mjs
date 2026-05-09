@@ -28,6 +28,7 @@ import {
   stripLegacyP10SquadsIfNeeded,
   repairP11Squad2014IfNeeded,
   compareMatchesChronologically,
+  pruneMatchLineupToSelectedSquad,
 } from "./selection.mjs";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -666,10 +667,13 @@ function normalizeMatchReportPayload(raw) {
 
 /** Räknas som deltagen i en genomförd match: vald, inte tackat nej, och tillgänglig (globalt). */
 function playerCountsAsPlayedInMatch(m, playerId, state) {
-  if (!m.selectedPlayerIds?.includes(playerId)) return false;
-  if (Array.isArray(m.declinedPlayerIds) && m.declinedPlayerIds.includes(playerId)) return false;
-  if (matchUnavailablePlayerIdSet(m).has(playerId)) return false;
-  const pl = state.players.find((x) => x.id === playerId);
+  const pid = String(playerId ?? "").trim();
+  const squad = new Set((m.selectedPlayerIds || []).map((id) => String(id ?? "").trim()).filter(Boolean));
+  if (!pid || !squad.has(pid)) return false;
+  const declined = new Set((m.declinedPlayerIds || []).map((id) => String(id ?? "").trim()).filter(Boolean));
+  if (declined.has(pid)) return false;
+  if (matchUnavailablePlayerIdSet(m).has(pid)) return false;
+  const pl = state.players.find((x) => String(x?.id ?? "") === pid);
   if (!pl || !isEligibleForMatchSquad(pl)) return false;
   if (!isPlayerAvailable(pl)) return false;
   return true;
@@ -834,6 +838,7 @@ function migrateStateShape(data) {
         }
       }
     }
+    if (pruneMatchLineupToSelectedSquad(m)) dirty = true;
   }
   if (!Array.isArray(data.fixturesP11)) {
     data.fixturesP11 = [];
