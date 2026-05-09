@@ -913,6 +913,7 @@ function migrateStateShape(data) {
         status: "not_played",
         selectedPlayerIds: [],
         declinedPlayerIds: [],
+        unavailablePlayerIds: [],
         intendedGroup2015: null,
         intendedGroup2016: null,
         selectionExplanation: null,
@@ -998,6 +999,8 @@ async function readState() {
   if (stripLegacyP10SquadsIfNeeded(data)) dirty = true;
   if (repairP11Squad2014IfNeeded(data)) dirty = true;
   if (ensureMinimumScheduleFromSeed(data)) dirty = true;
+  // Nya matcher från seed saknar fält tills migrateStateShape körts igen.
+  if (migrateStateShape(data)) dirty = true;
   if (applyRemoteSettingsIfNeeded(data)) dirty = true;
   if (reconcilePlayerStats(data)) dirty = true;
   if (backfillIntendedGroups2015(data)) dirty = true;
@@ -1016,6 +1019,7 @@ function normalizeImportedState(raw) {
   stripLegacyP10SquadsIfNeeded(data);
   repairP11Squad2014IfNeeded(data);
   ensureMinimumScheduleFromSeed(data);
+  migrateStateShape(data);
   reconcilePlayerStats(data);
   backfillIntendedGroups2015(data);
   if (!validateGroups2015(data)) throw new Error("groups2015_invalid");
@@ -1094,6 +1098,14 @@ function jsonState(state) {
 const app = express();
 app.use(cors());
 app.use(express.json({ limit: "10mb" }));
+// Hindra mellomlagring av API (PWA/service worker, CDN) så klient alltid får färsk state.
+app.use((req, res, next) => {
+  if (String(req.path || "").startsWith("/api")) {
+    res.setHeader("Cache-Control", "no-store, no-cache, must-revalidate, private");
+    res.setHeader("Pragma", "no-cache");
+  }
+  next();
+});
 
 const isProd = NODE_ENV === "production";
 if (isProd) {

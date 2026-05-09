@@ -40,30 +40,12 @@ export default defineConfig({
         cleanupOutdatedCaches: true,
         clientsClaim: true,
         skipWaiting: true,
+        // API får aldrig cacheas i SW — annars kan GET /api/state efter PUT visa gammal data
+        // (NetworkFirst faller tillbaka till cache vid långsam/lost nät).
         runtimeCaching: [
           {
-            urlPattern: /\/api\/.*/i,
-            handler: "NetworkFirst",
-            options: {
-              cacheName: "api-cache",
-              expiration: {
-                maxEntries: 30,
-                maxAgeSeconds: 60 * 60 * 24 * 7,
-              },
-              networkTimeoutSeconds: 3,
-            },
-          },
-          {
-            urlPattern: /^https:\/\/ifkolme-production\.up\.railway\.app\/api\/.*/i,
-            handler: "NetworkFirst",
-            options: {
-              cacheName: "api-cache-remote",
-              expiration: {
-                maxEntries: 30,
-                maxAgeSeconds: 60 * 60 * 24 * 7,
-              },
-              networkTimeoutSeconds: 3,
-            },
+            urlPattern: ({ url }) => /\/api\//i.test(url.pathname),
+            handler: "NetworkOnly",
           },
         ],
       },

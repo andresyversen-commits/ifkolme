@@ -2753,6 +2753,9 @@ export default function App() {
   const [overviewTeam, setOverviewTeam] = useState("p10");
   /** Statistik: spelarfilter — «2015» betyder födda 2014 eller 2015 (en gemensam flik). */
   const [overviewPlayerYear, setOverviewPlayerYear] = useState("all");
+  useEffect(() => {
+    if (!["all", "2015", "2016"].includes(overviewPlayerYear)) setOverviewPlayerYear("all");
+  }, [overviewPlayerYear]);
   /** Statistik: spelare vars matchlista visas i modal */
   const [overviewHistoryPlayerId, setOverviewHistoryPlayerId] = useState(null);
   /** Underflikar inom Spelargrupp: spelarlista, grupper eller tränare */
@@ -2798,7 +2801,8 @@ export default function App() {
 
   const load = useCallback(async (opts = {}) => {
     if (!opts.silent) setErr("");
-    const s = await api("/api/state");
+    // Unikt query mot /api/state så service worker / HTTP-diskcache inte levererar gammal payload.
+    const s = await api(`/api/state?_=${Date.now()}`);
     setState(() => s);
     return s;
   }, []);
