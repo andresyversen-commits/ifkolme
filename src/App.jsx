@@ -14,6 +14,9 @@ import {
   playerMatchParticipationKind,
   isPlayerSelectableForMatch,
   matchUnavailablePlayerIdSet,
+  isEligibleForMatchSquad,
+  isAllowedP11SquadPlayer,
+  sortedAllPlayerIds2014,
 } from "../selection.mjs";
 
 const PROD_API_FALLBACK = "https://ifkolme-production.up.railway.app";
@@ -1557,6 +1560,10 @@ function MatchCard({
     opponentRating: "",
   });
   const [reportBusy, setReportBusy] = useState(false);
+  const [playedSquadDraftIds, setPlayedSquadDraftIds] = useState([]);
+  const [playedSquadBusy, setPlayedSquadBusy] = useState(false);
+
+  const all2014PlayerIds = useMemo(() => sortedAllPlayerIds2014(state), [state.players]);
 
   useEffect(() => {
     setAssistDraft(String(m.fixture?.p11Assist2016 ?? 0));
@@ -1605,6 +1612,20 @@ function MatchCard({
     }
     setSlotPicks(init);
   }, [m.id, m.lineup, m.selectedPlayerIds, state.players]);
+
+  const playedSquadCanonicalSig = useMemo(() => {
+    const base = [...(m.selectedPlayerIds || [])].map(String);
+    const merged = isP11Branch ? [...new Set([...base, ...all2014PlayerIds])] : [...new Set(base)];
+    return merged.sort().join(",");
+  }, [m.selectedPlayerIds, isP11Branch, all2014PlayerIds]);
+
+  useEffect(() => {
+    if (m.status !== "played") return;
+    const base = [...(m.selectedPlayerIds || [])].map(String);
+    const merged = isP11Branch ? [...new Set([...base, ...all2014PlayerIds])] : base;
+    setPlayedSquadDraftIds(merged);
+  }, [m.id, m.status, isP11Branch, playedSquadCanonicalSig, all2014PlayerIds]);
+
   useEffect(() => {
     setMatchSubTab("squad");
   }, [m.id]);
@@ -1725,6 +1746,49 @@ function MatchCard({
       if (a.birthYear !== b.birthYear) return a.birthYear - b.birthYear;
       return a.name.localeCompare(b.name, "sv");
     });
+  const playedSquadEditorCandidates = useMemo(() => {
+    if (m.status !== "played") return [];
+    return [...state.players]
+      .filter((p) => (isP11Branch ? isAllowedP11SquadPlayer(p) : isEligibleForMatchSquad(p)))
+      .sort((a, b) => {
+        if (a.birthYear !== b.birthYear) return (a.birthYear || 0) - (b.birthYear || 0);
+        return a.name.localeCompare(b.name, "sv");
+      });
+  }, [m.status, isP11Branch, state.players]);
+  const playedSquadDraftSet = useMemo(() => new Set(playedSquadDraftIds.map(String)), [playedSquadDraftIds]);
+  const playedSquadDraftSig = useMemo(
+    () => [...playedSquadDraftSet].sort().join(","),
+    [playedSquadDraftSet],
+  );
+  const playedDraftYearCounts = useMemo(() => {
+    let c15 = 0;
+    let c16 = 0;
+    let c14 = 0;
+    for (const raw of playedSquadDraftIds) {
+      const pl = state.players.find((p) => String(p?.id) === String(raw));
+      const y = birthYearNum(pl);
+      if (y === 2015) c15 += 1;
+      else if (y === 2016) c16 += 1;
+      else if (y === 2014) c14 += 1;
+    }
+    return { c15, c16, c14 };
+  }, [playedSquadDraftIds, state.players]);
+  const togglePlayedSquadId = useCallback(
+    (playerId) => {
+      const sid = String(playerId);
+      if (isP11Branch) {
+        const pl = state.players.find((p) => String(p?.id) === sid);
+        if (pl && birthYearNum(pl) === 2014) return;
+      }
+      setPlayedSquadDraftIds((prev) => {
+        const set = new Set(prev.map(String));
+        if (set.has(sid)) set.delete(sid);
+        else set.add(sid);
+        return [...set];
+      });
+    },
+    [isP11Branch, state.players],
+  );
   const outfieldSlots = useMemo(() => buildOutfieldSlots(formationDraft), [formationDraft]);
   const outfieldSlotsKey = useMemo(() => outfieldSlots.map((s) => s.key).join("|"), [outfieldSlots]);
   useEffect(() => {
@@ -2034,6 +2098,74 @@ function MatchCard({
               <p className="text-muted" style={{ marginTop: 8 }}>
                 Tackar nej till matchen: {declinedRows.map((p) => `${p.name} (${p.birthYear})`).join(", ")}
               </p>
+            ) : null}
+            {m.status === "played" && playedSquadEditorCandidates.length > 0 ? (
+              <div className="played-squad-editor" style={{ marginTop: 14, borderTop: "1px solid var(--border-subtle)", paddingTop: 12 }}>
+                <h4 className="panel__title" style={{ fontSize: 15, margin: "0 0 8px" }}>
+                  Korrigera trupp
+                </h4>
+                <p className="text-muted" style={{ marginBottom: 10, fontSize: 14 }}>
+                  {isP11Branch
+                    ? "Alla födda 2014 ingår alltid i P11-truppen (kan inte avmarkeras). Övriga födelseår: samma regler som vid genomförd match."
+                    : "Kryssa i vilka som ingick. Exakt tre födda 2015 och minst en född 2016."}
+                  {squadMode === "p11Mixed" ? ` Exakt ${assist2016Target} födda 2016 (assist).` : null}
+                </p>
+                <p className="text-muted" style={{ marginBottom: 10, fontSize: 13 }}>
+                  Urval just nu: {playedDraftYearCounts.c15}×2015, {playedDraftYearCounts.c16}×2016
+                  {isP11Branch ? `, ${playedDraftYearCounts.c14}×2014` : ""}
+                </p>
+                <div className="lineup-player-grid" style={{ maxHeight: 280, overflowY: "auto", paddingRight: 4 }}>
+                  {playedSquadEditorCandidates.map((p) => {
+                    const sid = String(p.id);
+                    const isLocked2014 = isP11Branch && birthYearNum(p) === 2014;
+                    const checked = isLocked2014 || playedSquadDraftSet.has(sid);
+                    return (
+                      <label
+                        key={`played-squad-${p.id}`}
+                        className="field"
+                        style={{ flexDirection: "row", alignItems: "center", gap: 8, marginBottom: 0 }}
+                      >
+                        <input
+                          type="checkbox"
+                          checked={checked}
+                          disabled={isLocked2014 || playedSquadBusy}
+                          onChange={() => {
+                            if (!isLocked2014) togglePlayedSquadId(p.id);
+                          }}
+                        />
+                        <span>
+                          {p.name}{" "}
+                          <span style={{ color: "var(--text-secondary)" }}>({p.birthYear})</span>
+                        </span>
+                      </label>
+                    );
+                  })}
+                </div>
+                <div className="btn-row" style={{ marginTop: 10 }}>
+                  <button
+                    type="button"
+                    className="btn btn--secondary"
+                    disabled={playedSquadBusy || playedSquadDraftSig === playedSquadCanonicalSig}
+                    onClick={async () => {
+                      setPlayedSquadBusy(true);
+                      setErr("");
+                      try {
+                        await api(`/api/matches/${m.id}/squad`, {
+                          method: "PUT",
+                          body: { selectedPlayerIds: playedSquadDraftIds },
+                        });
+                        await load({ silent: true });
+                      } catch (x) {
+                        setErr(x.message);
+                      } finally {
+                        setPlayedSquadBusy(false);
+                      }
+                    }}
+                  >
+                    Spara trupp
+                  </button>
+                </div>
+              </div>
             ) : null}
           </>
         ) : (

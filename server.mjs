@@ -29,13 +29,14 @@ import {
   repairP11Squad2014IfNeeded,
   compareMatchesChronologically,
   pruneMatchLineupToSelectedSquad,
+  pruneMatchUnavailableToSquad,
+  validateMatchSquadForComplete,
 } from "./selection.mjs";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const DATA_PATH = path.join(__dirname, "data.json");
 const SEED_PATH = path.join(__dirname, "data.seed.json");
 const MATCH_COUNT = 13;
-const MAX_2015 = 3;
 const COACH_NAMES = ["Jonas", "Per", "Anders", "Kim"];
 const DATABASE_URL = process.env.DATABASE_URL || "";
 const NODE_ENV = process.env.NODE_ENV || "development";
@@ -1462,6 +1463,35 @@ app.put("/api/matches/:id/lineup", async (req, res) => {
   res.json(jsonState(state));
 });
 
+/** Korrigera trupp för redan spelad match (uppdaterar statistik). */
+app.put("/api/matches/:id/squad", async (req, res) => {
+  const state = await readState();
+  const match = state.matches.find((m) => m.id === req.params.id);
+  if (!match) return res.status(404).json({ error: "Match hittades inte" });
+  if (match.status !== "played") {
+    return res.status(400).json({ error: "Efterhandsändring av trupp gäller bara spelade matcher." });
+  }
+  const raw = req.body?.selectedPlayerIds;
+  if (!Array.isArray(raw)) return res.status(400).json({ error: "Ogiltig trupp" });
+  const uniq = [...new Set(raw.map((id) => String(id ?? "").trim()).filter(Boolean))];
+  const p11Complete = (match.branch || "p10") === "p11";
+  const selectedPlayerIds = p11Complete ? appendP11Bench2014Players(state, uniq) : uniq;
+
+  const squadValidation = validateMatchSquadForComplete(state, match, selectedPlayerIds);
+  if (!squadValidation.ok) return res.status(400).json({ error: squadValidation.error });
+
+  match.selectedPlayerIds = selectedPlayerIds;
+  const selSet = new Set(selectedPlayerIds.map(String));
+  if (Array.isArray(match.declinedPlayerIds)) {
+    match.declinedPlayerIds = match.declinedPlayerIds.filter((id) => !selSet.has(String(id)));
+  }
+  pruneMatchUnavailableToSquad(match);
+  pruneMatchLineupToSelectedSquad(match);
+  reconcilePlayerStats(state);
+  await writeState(state);
+  res.json(jsonState(state));
+});
+
 app.delete("/api/players/:id", async (req, res) => {
   const state = await readState();
   state.players = state.players.filter((x) => x.id !== req.params.id);
@@ -1543,61 +1573,8 @@ app.post("/api/matches/:id/complete", async (req, res) => {
     match.selectedPlayerIds = appendP11Bench2014Players(state, [...match.selectedPlayerIds]);
   }
 
-  for (const id of match.selectedPlayerIds) {
-    const pl = state.players.find((p) => p.id === id);
-    if (!pl) {
-      return res.status(400).json({ error: "Truppen innehåller ogiltigt spelar-ID." });
-    }
-    if (p11Complete) {
-      if (!isAllowedP11SquadPlayer(pl)) {
-        return res.status(400).json({
-          error: "P11-truppen får bara innehålla spelare födda 2014, 2015 eller 2016.",
-        });
-      }
-    } else if (!isEligibleForMatchSquad(pl)) {
-      return res.status(400).json({
-        error: "Truppen får bara innehålla spelare födda 2015 eller 2016 (2014 och andra år kan inte matchspela).",
-      });
-    }
-  }
-
-  const count2015 = match.selectedPlayerIds.filter((id) => {
-    const pl = state.players.find((p) => p.id === id);
-    return birthYearNum(pl) === 2015;
-  }).length;
-  const count2016 = match.selectedPlayerIds.filter((id) => {
-    const pl = state.players.find((p) => p.id === id);
-    return birthYearNum(pl) === 2016;
-  }).length;
-  const mode = matchSquadMode(match);
-  if (mode === "p11Mixed") {
-    const nAssist = p11Assist2016Count(match, state);
-    const sel2015 = match.selectedPlayerIds.filter((id) => birthYearNum(state.players.find((p) => p.id === id)) === 2015);
-    if (sel2015.length < 1) {
-      return res.status(400).json({ error: "Minst en spelare födda 2015 krävs i truppen." });
-    }
-    if (count2016 !== nAssist) {
-      return res.status(400).json({
-        error: `Exakt ${nAssist} spelare födda 2016 krävs (assist). Välj lag på nytt.`,
-      });
-    }
-  } else if (mode === "all2015") {
-    if (count2016 !== 0) {
-      return res.status(400).json({ error: "P11-seriematcher får endast innehålla spelare födda 2015." });
-    }
-    if (count2015 < 1) {
-      return res.status(400).json({ error: "Minst en spelare födda 2015 krävs i truppen." });
-    }
-  } else {
-    // P 10 / blandat: tillåt genomförd match även om frånvaro ändrats efter lagval (ingen ersättare krävs).
-    if (count2015 !== MAX_2015) {
-      return res.status(400).json({ error: "Exakt tre spelare födda 2015 krävs för att genomföra matchen." });
-    }
-    const sel2016 = match.selectedPlayerIds.filter((id) => birthYearNum(state.players.find((p) => p.id === id)) === 2016);
-    if (sel2016.length < 1) {
-      return res.status(400).json({ error: "Minst en spelare födda 2016 krävs i den valda truppen." });
-    }
-  }
+  const squadValidation = validateMatchSquadForComplete(state, match, match.selectedPlayerIds);
+  if (!squadValidation.ok) return res.status(400).json({ error: squadValidation.error });
 
   repairGroups2015IfNeeded(state);
   repairGroups2016IfNeeded(state);
@@ -1607,7 +1584,7 @@ app.post("/api/matches/:id/complete", async (req, res) => {
       match.intendedGroup2015 = inferIntendedGroup2015(state.groups2015, ids2015);
     }
   }
-  if (mode === "p11Mixed" && !match.intendedGroup2016) {
+  if (matchSquadMode(match) === "p11Mixed" && !match.intendedGroup2016) {
     const ids2016 = match.selectedPlayerIds.filter((id) => birthYearNum(state.players.find((p) => p.id === id)) === 2016);
     if (ids2016.length) {
       match.intendedGroup2016 = inferIntendedGroup2016(state.groups2016, ids2016);

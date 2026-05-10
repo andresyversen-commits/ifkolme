@@ -195,7 +195,7 @@ export function isPlayerSelectableForMatch(p, match) {
   return !isPlayerUnavailableForThisMatch(p, match);
 }
 
-function pruneMatchUnavailableToSquad(match) {
+export function pruneMatchUnavailableToSquad(match) {
   const sel = new Set(
     (Array.isArray(match.selectedPlayerIds) ? match.selectedPlayerIds : [])
       .map((id) => String(id ?? "").trim())
@@ -630,6 +630,68 @@ export function matchSquadMode(match) {
   }
   if (s.includes("P 10")) return "mixed";
   return "mixed";
+}
+
+/**
+ * Validerar truppsammansättning som vid genomförd match.
+ * `selectedPlayerIds` ska vara den fulla listan, inkl. alla 2014 på P11 (efter appendP11Bench2014Players).
+ */
+export function validateMatchSquadForComplete(state, match, selectedPlayerIds) {
+  const ids = Array.isArray(selectedPlayerIds) ? selectedPlayerIds : [];
+  if (!ids.length) return { ok: false, error: "Truppen är tom." };
+
+  const p11Complete = (match.branch || "p10") === "p11";
+  for (const id of ids) {
+    const pl = state.players.find((p) => p.id === id);
+    if (!pl) return { ok: false, error: "Truppen innehåller ogiltigt spelar-ID." };
+    if (p11Complete) {
+      if (!isAllowedP11SquadPlayer(pl)) {
+        return {
+          ok: false,
+          error: "P11-truppen får bara innehålla spelare födda 2014, 2015 eller 2016.",
+        };
+      }
+    } else if (!isEligibleForMatchSquad(pl)) {
+      return {
+        ok: false,
+        error:
+          "Truppen får bara innehålla spelare födda 2015 eller 2016 (2014 och andra år kan inte matchspela).",
+      };
+    }
+  }
+
+  const count2015 = ids.filter((id) => birthYearNum(state.players.find((p) => p.id === id)) === 2015).length;
+  const count2016 = ids.filter((id) => birthYearNum(state.players.find((p) => p.id === id)) === 2016).length;
+  const mode = matchSquadMode(match);
+  if (mode === "p11Mixed") {
+    const nAssist = p11Assist2016Count(match, state);
+    const sel2015 = ids.filter((id) => birthYearNum(state.players.find((p) => p.id === id)) === 2015);
+    if (sel2015.length < 1) {
+      return { ok: false, error: "Minst en spelare födda 2015 krävs i truppen." };
+    }
+    if (count2016 !== nAssist) {
+      return {
+        ok: false,
+        error: `Exakt ${nAssist} spelare födda 2016 krävs (assist). Välj lag på nytt.`,
+      };
+    }
+  } else if (mode === "all2015") {
+    if (count2016 !== 0) {
+      return { ok: false, error: "P11-seriematcher får endast innehålla spelare födda 2015." };
+    }
+    if (count2015 < 1) {
+      return { ok: false, error: "Minst en spelare födda 2015 krävs i truppen." };
+    }
+  } else {
+    if (count2015 !== MAX_2015_ON_FIELD) {
+      return { ok: false, error: "Exakt tre spelare födda 2015 krävs för att genomföra matchen." };
+    }
+    const sel2016 = ids.filter((id) => birthYearNum(state.players.find((p) => p.id === id)) === 2016);
+    if (sel2016.length < 1) {
+      return { ok: false, error: "Minst en spelare födda 2016 krävs i den valda truppen." };
+    }
+  }
+  return { ok: true };
 }
 
 function sortedAvailableIdsByYear(state, year, match = null) {
