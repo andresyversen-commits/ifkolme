@@ -686,8 +686,15 @@ body {
   font-size: 17px;
   font-weight: 600;
   margin: 0;
-  word-break: break-word;
+  word-break: normal;
+  overflow-wrap: break-word;
   min-width: 0;
+}
+
+.stat-row__age-suffix {
+  font-weight: 400;
+  color: var(--text-secondary);
+  font-size: 14px;
 }
 
 .stat-row__year {
@@ -767,15 +774,16 @@ body {
   font-size: 17px;
 }
 
-/* Statistik: fyra kolumner (utan «senaste match») */
+/* Statistik: fyra kolumner (utan «senaste match»).
+   Viktigt: kolumn 3–4 får inte `1fr` — då delar de utrymme med namnet och gör namnet smalt på mobil. */
 .stat-list.stat-list--overview > .stat-head {
   display: grid;
   grid-template-columns:
     minmax(0, 1fr)
-    minmax(2.75rem, 3.25rem)
-    minmax(5.75rem, 1fr)
-    minmax(5.75rem, 1fr);
-  column-gap: 14px;
+    minmax(2rem, 2.5rem)
+    minmax(2.5rem, 3.25rem)
+    minmax(2.75rem, 3.75rem);
+  column-gap: 10px;
   row-gap: 6px;
 }
 
@@ -784,10 +792,10 @@ body {
   align-items: center;
   grid-template-columns:
     minmax(0, 1fr)
-    minmax(2.75rem, 3.25rem)
-    minmax(5.75rem, 1fr)
-    minmax(5.75rem, 1fr);
-  column-gap: 14px;
+    minmax(2rem, 2.5rem)
+    minmax(2.5rem, 3.25rem)
+    minmax(2.75rem, 3.75rem);
+  column-gap: 10px;
   row-gap: 6px;
   cursor: pointer;
   text-align: inherit;
@@ -824,6 +832,51 @@ body {
   font-variant-numeric: tabular-nums;
   font-weight: 700;
   font-size: 18px;
+}
+
+@media (max-width: 520px) {
+  .stat-list.stat-list--overview > .stat-head,
+  .stat-list.stat-list--overview > .stat-row--clickable {
+    grid-template-columns:
+      minmax(0, 1fr)
+      2.25rem
+      2.75rem
+      3rem;
+    column-gap: 8px;
+    padding-left: 12px;
+    padding-right: 12px;
+  }
+
+  .stat-list.stat-list--overview > .stat-head {
+    font-size: 10px;
+    padding-top: 8px;
+    padding-bottom: 8px;
+  }
+
+  .stat-list.stat-list--overview > .stat-head span:nth-child(3),
+  .stat-list.stat-list--overview > .stat-head span:nth-child(4) {
+    line-height: 1.15;
+    hyphens: auto;
+    overflow-wrap: break-word;
+  }
+
+  .stat-list--overview .stat-row__name {
+    font-size: 16px;
+  }
+
+  .stat-list--overview .stat-row__year {
+    font-size: 14px;
+    min-width: 0;
+  }
+
+  .stat-list--overview .stat-row__value,
+  .stat-list--overview .stat-row__declined {
+    font-size: 16px;
+  }
+
+  .stat-list--overview .stat-row__age-suffix {
+    display: none;
+  }
 }
 
 .player-history-modal__lead {

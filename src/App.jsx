@@ -4613,7 +4613,7 @@ export default function App() {
               aria-label="Filtrera spelare efter födelseår"
             >
               {[
-                { id: "all", label: "Alle" },
+                { id: "all", label: "Alla" },
                 { id: "2015", label: "2014–2015" },
                 { id: "2016", label: "2016" },
               ].map((o) => (
@@ -4659,7 +4659,7 @@ export default function App() {
                   >
                     <p className="stat-row__name">
                       {p.name}
-                      <span style={{ fontWeight: 400, color: "var(--text-secondary)", fontSize: 14 }}>
+                      <span className="stat-row__age-suffix">
                         {" "}
                         · {playerAge(birthYearNum(p))} år
                       </span>
