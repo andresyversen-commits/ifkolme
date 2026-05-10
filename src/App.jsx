@@ -1563,8 +1563,6 @@ function MatchCard({
   const [playedSquadDraftIds, setPlayedSquadDraftIds] = useState([]);
   const [playedSquadBusy, setPlayedSquadBusy] = useState(false);
 
-  const all2014PlayerIds = useMemo(() => sortedAllPlayerIds2014(state), [state.players]);
-
   useEffect(() => {
     setAssistDraft(String(m.fixture?.p11Assist2016 ?? 0));
   }, [m.fixture?.p11Assist2016, m.id]);
@@ -1615,16 +1613,16 @@ function MatchCard({
 
   const playedSquadCanonicalSig = useMemo(() => {
     const base = [...(m.selectedPlayerIds || [])].map(String);
-    const merged = isP11Branch ? [...new Set([...base, ...all2014PlayerIds])] : [...new Set(base)];
-    return merged.sort().join(",");
-  }, [m.selectedPlayerIds, isP11Branch, all2014PlayerIds]);
+    if (!isP11Branch) return [...new Set(base)].sort().join(",");
+    return [...new Set([...base, ...sortedAllPlayerIds2014(state)])].sort().join(",");
+  }, [m.selectedPlayerIds, isP11Branch, state.players]);
 
   useEffect(() => {
     if (m.status !== "played") return;
     const base = [...(m.selectedPlayerIds || [])].map(String);
-    const merged = isP11Branch ? [...new Set([...base, ...all2014PlayerIds])] : base;
+    const merged = isP11Branch ? [...new Set([...base, ...sortedAllPlayerIds2014(state)])] : base;
     setPlayedSquadDraftIds(merged);
-  }, [m.id, m.status, isP11Branch, playedSquadCanonicalSig, all2014PlayerIds]);
+  }, [m.id, m.status, isP11Branch, playedSquadCanonicalSig]);
 
   useEffect(() => {
     setMatchSubTab("squad");
