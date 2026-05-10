@@ -1546,9 +1546,9 @@ function MatchCard({
   }));
   const sideDraft = "vänster";
   const [matchSubTab, setMatchSubTab] = useState("squad");
-  const [positionDraftByPlayer, setPositionDraftByPlayer] = useState({});
-  const [substitutionDraftByInPlayer, setSubstitutionDraftByInPlayer] = useState({});
+  const [slotPicks, setSlotPicks] = useState({});
   const lineupDraftSignatureRef = useRef("");
+  const outfieldSlotsMetaRef = useRef({ id: null, key: "" });
   const [matchDialog, setMatchDialog] = useState(null);
   const [reportForm, setReportForm] = useState({
     result: "",
@@ -1591,29 +1591,19 @@ function MatchCard({
     const squad = new Set(
       (m.selectedPlayerIds || []).map((id) => String(id ?? "").trim()).filter(Boolean),
     );
-    const next = {};
-    for (const sid of squad) {
-      const p = state.players.find((x) => String(x?.id ?? "") === sid);
-      if (p) next[sid] = "bench";
-    }
+    const init = { gk: "" };
+    for (const s of slots) init[s.key] = "";
     for (const row of m.lineup?.starters || []) {
       const pid = String(row?.playerId ?? "").trim();
       if (!pid || !squad.has(pid)) continue;
       if (row.role === "goalkeeper") {
-        next[pid] = "gk";
+        init.gk = pid;
         continue;
       }
       const slot = slots.find((s) => s.role === row.role && Number(s.order) === Number(row.order));
-      if (slot) next[pid] = slot.key;
+      if (slot) init[slot.key] = pid;
     }
-    setPositionDraftByPlayer(next);
-    const nextSubs = {};
-    for (const row of m.lineup?.substitutions || []) {
-      const inId = String(row?.inPlayerId || "").trim();
-      const outId = String(row?.outPlayerId || "").trim();
-      if (inId && outId && squad.has(inId) && squad.has(outId)) nextSubs[inId] = outId;
-    }
-    setSubstitutionDraftByInPlayer(nextSubs);
+    setSlotPicks(init);
   }, [m.id, m.lineup, m.selectedPlayerIds, state.players]);
   useEffect(() => {
     setMatchSubTab("squad");
@@ -1736,20 +1726,41 @@ function MatchCard({
       return a.name.localeCompare(b.name, "sv");
     });
   const outfieldSlots = useMemo(() => buildOutfieldSlots(formationDraft), [formationDraft]);
-  const selectedLineupIds = useMemo(() => new Set(selectedRows.map((p) => String(p?.id ?? ""))), [selectedRows]);
+  const outfieldSlotsKey = useMemo(() => outfieldSlots.map((s) => s.key).join("|"), [outfieldSlots]);
+  useEffect(() => {
+    const meta = outfieldSlotsMetaRef.current;
+    if (meta.id !== m.id) {
+      outfieldSlotsMetaRef.current = { id: m.id, key: outfieldSlotsKey };
+      return;
+    }
+    if (meta.key === outfieldSlotsKey) return;
+    outfieldSlotsMetaRef.current = { id: m.id, key: outfieldSlotsKey };
+    setSlotPicks((prev) => {
+      if (!prev || typeof prev !== "object") {
+        const empty = { gk: "" };
+        for (const s of outfieldSlots) empty[s.key] = "";
+        return empty;
+      }
+      const next = { gk: prev.gk || "" };
+      for (const s of outfieldSlots) {
+        next[s.key] = prev[s.key] || "";
+      }
+      return next;
+    });
+  }, [m.id, outfieldSlotsKey, outfieldSlots]);
   const formationTotal = Number(formationDraft.defenders || 0) + Number(formationDraft.midfielders || 0) + Number(formationDraft.attackers || 0);
   const slotToPlayer = useMemo(() => {
     const map = {};
-    for (const [playerId, slotKey] of Object.entries(positionDraftByPlayer || {})) {
-      const pid = String(playerId ?? "").trim();
-      if (!selectedLineupIds.has(pid)) continue;
-      if (!slotKey || slotKey === "bench") continue;
-      if (!map[slotKey]) map[slotKey] = pid;
+    const gk = String(slotPicks?.gk ?? "").trim();
+    if (gk) map.gk = gk;
+    for (const slot of outfieldSlots) {
+      const pid = String(slotPicks?.[slot.key] ?? "").trim();
+      if (pid) map[slot.key] = pid;
     }
     return map;
-  }, [positionDraftByPlayer, selectedLineupIds]);
+  }, [slotPicks, outfieldSlots]);
   const starterIds = Object.values(slotToPlayer).filter(Boolean);
-  const startersUnique = new Set(starterIds).size === starterIds.length;
+  const startersUnique = new Set(starterIds.map(String)).size === starterIds.length;
   const startersReady = Boolean(slotToPlayer.gk) && outfieldSlots.every((slot) => Boolean(slotToPlayer[slot.key])) && startersUnique;
   const savedLineupCount = Math.min(
     7,
@@ -1760,30 +1771,27 @@ function MatchCard({
     for (const p of selectedRows) map.set(String(p.id), p);
     return map;
   }, [selectedRows]);
-  const benchPlayers = useMemo(
-    () => selectedRows.filter((p) => (positionDraftByPlayer[String(p.id)] || "bench") === "bench"),
-    [selectedRows, positionDraftByPlayer],
+  const assignedStarterIds = useMemo(() => {
+    const ids = [slotToPlayer.gk, ...outfieldSlots.map((s) => slotToPlayer[s.key])].filter(Boolean).map(String);
+    return new Set(ids);
+  }, [slotToPlayer, outfieldSlots]);
+  const benchRows = useMemo(
+    () => selectedRows.filter((p) => !assignedStarterIds.has(String(p.id))),
+    [selectedRows, assignedStarterIds],
   );
-  const starterPlayers = useMemo(() => {
-    const ids = [slotToPlayer.gk, ...outfieldSlots.map((slot) => slotToPlayer[slot.key])].filter(Boolean);
-    return ids.map((id) => selectedById.get(id)).filter(Boolean);
-  }, [slotToPlayer, outfieldSlots, selectedById]);
-  const substitutionOutIds = benchPlayers
-    .map((p) => String(substitutionDraftByInPlayer[String(p.id)] || ""))
-    .filter(Boolean);
-  const substitutionsUnique = new Set(substitutionOutIds).size === substitutionOutIds.length;
-  const plannedBenchByInId = useMemo(() => {
-    const map = new Map();
-    for (const bench of benchPlayers) {
-      const bid = String(bench.id);
-      const outId = String(substitutionDraftByInPlayer[bid] || "");
-      if (!outId) continue;
-      map.set(bid, outId);
-    }
-    return map;
-  }, [benchPlayers, substitutionDraftByInPlayer]);
-  const plannedBenchPlayers = benchPlayers.filter((p) => plannedBenchByInId.has(String(p.id)));
-  const unassignedBenchPlayers = benchPlayers.filter((p) => !plannedBenchByInId.has(String(p.id)));
+  const pickPlayerForSlot = (slotKey, rawValue) => {
+    const playerId = String(rawValue || "").trim();
+    setSlotPicks((prev) => {
+      const base = { ...(prev && typeof prev === "object" ? prev : {}) };
+      if (playerId) {
+        for (const k of Object.keys(base)) {
+          if (String(base[k] || "").trim() === playerId) base[k] = "";
+        }
+      }
+      base[slotKey] = playerId;
+      return base;
+    });
+  };
 
   const names2015 = selectedRowsAll.filter((p) => birthYearNum(p) === 2015).map((p) => p.name);
   const names2016 = selectedRowsAll.filter((p) => birthYearNum(p) === 2016).map((p) => p.name);
@@ -1841,19 +1849,6 @@ function MatchCard({
           method: "PUT",
           body: { playerId: player.id, unavailable: true },
         });
-        if (
-          m.status !== "played" &&
-          Array.isArray(m.selectedPlayerIds) &&
-          m.selectedPlayerIds.includes(player.id)
-        ) {
-          const wantsReplacement = confirm(
-            `${player.name} markerades som sjuk/frånvarande för denna match. Vill du uppdatera laget automatiskt med nästa i kön nu?`,
-          );
-          if (wantsReplacement) {
-            await api(`/api/matches/${m.id}/select`, { method: "POST" });
-            if (typeof onCopied === "function") onCopied("Laget uppdaterat med nästa i kön.");
-          }
-        }
       } else if (kind === "declined") {
         await api(`/api/matches/${m.id}/decline`, {
           method: "PUT",
@@ -2087,77 +2082,52 @@ function MatchCard({
           ) : (
             <div className="lineup-layout">
               <div className="lineup-layout__controls">
-                <div className="lineup-dnd-help">Välj position för varje spelare.</div>
+                <div className="lineup-dnd-help">Välj spelare för varje position.</div>
                 <div className="lineup-player-grid">
-                  {selectedRows.map((p) => (
-                    <div key={`pos-${p.id}`} className="field">
-                      <span className="field__label">
-                        {p.name} {p.jerseyNumber ? `#${p.jerseyNumber}` : ""}
-                      </span>
+                  <div className="field">
+                    <span className="field__label">Målvakt</span>
+                    <select
+                      className="field__select"
+                      value={String(slotPicks.gk || "")}
+                      onChange={(e) => pickPlayerForSlot("gk", e.target.value)}
+                    >
+                      <option value="">— Välj —</option>
+                      {selectedRows.map((p) => (
+                        <option key={`gk-opt-${p.id}`} value={String(p.id)}>
+                          {p.name}
+                          {p.jerseyNumber ? ` #${p.jerseyNumber}` : ""}
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+                  {outfieldSlots.map((slot) => (
+                    <div key={slot.key} className="field">
+                      <span className="field__label">{slotLabelFromKey(slot.key, outfieldSlots)}</span>
                       <select
                         className="field__select"
-                        value={positionDraftByPlayer[String(p.id)] || "bench"}
-                        onChange={(e) =>
-                          setPositionDraftByPlayer((prev) => ({
-                            ...prev,
-                            [String(p.id)]: e.target.value,
-                          }))
-                        }
+                        value={String(slotPicks[slot.key] || "")}
+                        onChange={(e) => pickPlayerForSlot(slot.key, e.target.value)}
                       >
-                        <option value="bench">Bänk</option>
-                        <option value="gk">Målvakt</option>
-                        {outfieldSlots.map((slot) => (
-                          <option key={`opt-${slot.key}`} value={slot.key}>
-                            {slotLabelFromKey(slot.key, outfieldSlots)}
+                        <option value="">— Välj —</option>
+                        {selectedRows.map((p) => (
+                          <option key={`${slot.key}-opt-${p.id}`} value={String(p.id)}>
+                            {p.name}
+                            {p.jerseyNumber ? ` #${p.jerseyNumber}` : ""}
                           </option>
                         ))}
                       </select>
                     </div>
                   ))}
                 </div>
-                {!startersUnique ? <p className="text-muted">En position kan bara ha en spelare. Välj unika positioner.</p> : null}
+                {!startersUnique ? <p className="text-muted">En spelare kan bara stå på en position åt gången.</p> : null}
                 {startersUnique && !startersReady ? (
                   <p className="text-muted">Varning: inte alla positioner är fyllda än. Du kan ändå spara utkastet.</p>
-                ) : null}
-                {benchPlayers.length > 0 ? (
-                  <div className="lineup-substitutions">
-                    <p className="text-muted" style={{ marginBottom: 6 }}>
-                      Byten (valfritt): välj vem varje bänkspelare ska byta med.
-                    </p>
-                    {benchPlayers.map((bench) => (
-                      <div key={`sub-${bench.id}`} className="field">
-                        <span className="field__label">
-                          {bench.name} {bench.jerseyNumber ? `#${bench.jerseyNumber}` : ""}
-                        </span>
-                        <select
-                          className="field__select"
-                          value={substitutionDraftByInPlayer[String(bench.id)] || ""}
-                          onChange={(e) =>
-                            setSubstitutionDraftByInPlayer((prev) => ({
-                              ...prev,
-                              [String(bench.id)]: e.target.value,
-                            }))
-                          }
-                        >
-                          <option value="">Ingen planerad ersättning</option>
-                          {starterPlayers.map((starter) => (
-                            <option key={`sub-opt-${bench.id}-${starter.id}`} value={starter.id}>
-                              {starter.name} {starter.jerseyNumber ? `#${starter.jerseyNumber}` : ""}
-                            </option>
-                          ))}
-                        </select>
-                      </div>
-                    ))}
-                    {!substitutionsUnique ? (
-                      <p className="text-muted">En startspelare kan bara väljas för ett planerat byte.</p>
-                    ) : null}
-                  </div>
                 ) : null}
                 <div className="btn-row" style={{ marginTop: 6 }}>
                   <button
                     type="button"
                     className="btn btn--primary"
-                    disabled={formationTotal !== 6 || !startersUnique || !substitutionsUnique}
+                    disabled={formationTotal !== 6 || !startersUnique}
                     onClick={async () => {
                       setErr("");
                       try {
@@ -2176,21 +2146,13 @@ function MatchCard({
                               : null,
                           ),
                         ].filter(Boolean);
-                        const substitutions = benchPlayers
-                          .map((bench, idx) => ({
-                            order: idx + 1,
-                            outPlayerId: String(substitutionDraftByInPlayer[String(bench.id)] || ""),
-                            inPlayerId: bench.id,
-                            note: "",
-                          }))
-                          .filter((row) => row.outPlayerId && row.inPlayerId);
                         await api(`/api/matches/${m.id}/lineup`, {
                           method: "PUT",
                           body: {
                             formation: formationDraft,
                             side: sideDraft,
                             starters,
-                            substitutions,
+                            substitutions: [],
                           },
                         });
                         await load();
@@ -2242,22 +2204,8 @@ function MatchCard({
                   </p>
                 </div>
                 <div className="lineup-bench-under-pitch">
-                  {plannedBenchPlayers.length > 0 ? (
-                    <div className="match-card__planned-subs">
-                      <p className="match-card__planned-subs-title">Planerade byten</p>
-                      {plannedBenchPlayers.map((bench, idx) => (
-                        <p key={`${bench.id}-${idx}`} className="match-card__planned-subs-item">
-                          {bench.name} in för {playerName(plannedBenchByInId.get(String(bench.id)))}
-                        </p>
-                      ))}
-                    </div>
-                  ) : null}
-                  {unassignedBenchPlayers.length > 0 ? (
-                    <p className="text-muted">
-                      Bänk (ej planerat byte): {unassignedBenchPlayers.map((p) => p.name).join(", ")}
-                    </p>
-                  ) : benchPlayers.length > 0 ? (
-                    <p className="text-muted">Alla bänkspelare har planerade byten.</p>
+                  {benchRows.length > 0 ? (
+                    <p className="text-muted">Bänk: {benchRows.map((p) => p.name).join(", ")}</p>
                   ) : null}
                 </div>
               </div>
