@@ -2230,12 +2230,36 @@ body {
   font-size: 9px;
 }
 
+.calendar-agenda__meta-col {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  justify-content: center;
+  gap: 4px;
+  min-width: 0;
+  max-width: 100%;
+}
+
 .calendar-agenda__time {
   font-size: 14px;
   font-weight: 600;
   color: var(--muted-foreground);
   white-space: nowrap;
   padding-right: 2px;
+}
+
+.calendar-agenda__result {
+  font-size: 13px;
+  font-weight: 800;
+  font-variant-numeric: tabular-nums;
+  letter-spacing: 0.02em;
+  color: var(--foreground);
+  line-height: 1.1;
+  text-align: right;
+  max-width: 6.5rem;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .matches-layout {
@@ -2457,11 +2481,24 @@ body {
   color: var(--muted-foreground);
   line-height: 1.2;
   display: flex;
-  align-items: center;
+  flex-direction: column;
+  align-items: flex-start;
   justify-content: flex-start;
-  flex-wrap: wrap;
-  gap: 8px;
+  gap: 3px;
   min-width: 0;
+}
+
+.calendar-event__result {
+  font-size: 11px;
+  font-weight: 800;
+  font-variant-numeric: tabular-nums;
+  letter-spacing: 0.02em;
+  color: var(--foreground);
+  line-height: 1.15;
+  width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .calendar-event__hint {
@@ -2935,6 +2972,10 @@ body {
 
   .calendar-event__time {
     font-size: 9px;
+  }
+
+  .calendar-event__result {
+    font-size: 10px;
   }
 
   .lineup-list__row {

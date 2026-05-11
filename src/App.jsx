@@ -3511,6 +3511,12 @@ export default function App() {
     return m.fixture.time;
   }
 
+  function calendarMatchResultText(m) {
+    if (m.status !== "played") return null;
+    const raw = String(m.matchReport?.result || "").trim();
+    return raw ? displayMatchResult(m.matchReport.result) : null;
+  }
+
   function calendarOpponentLogo(m) {
     const home = m.fixture?.home || m.fixture?.homeTeam || "";
     const away = m.fixture?.away || m.fixture?.awayTeam || "";
@@ -4433,6 +4439,7 @@ export default function App() {
                         const opponent = calendarOpponentName(m);
                         const oppLogo = calendarOpponentLogo(m);
                         const hasUpdate = (m.comments || []).length > 0 && m.status !== "played";
+                        const resultText = calendarMatchResultText(m);
                         const dt = parseIsoDateLocal(m.fixture?.date);
                         const dayNum = dt ? dt.getDate() : "";
                         const dow = dt
@@ -4441,13 +4448,23 @@ export default function App() {
                         const monthShort = dt
                           ? dt.toLocaleDateString("sv-SE", { month: "short" }).replace(/\.$/, "")
                           : "";
+                        const agendaAria = [
+                          `Match ${m.number}`,
+                          branchLabel,
+                          `mot ${opponent}`,
+                          calendarTimeLabel(m),
+                          st.label,
+                          resultText ? `resultat ${resultText}` : null,
+                        ]
+                          .filter(Boolean)
+                          .join(", ");
                         return (
                           <li key={`agenda-${m.id}`}>
                             <button
                               type="button"
                               className={`calendar-agenda__row calendar-agenda__row--${branchLabel.toLowerCase()}${activeMatchId === m.id ? " calendar-agenda__row--active" : ""}`}
                               onClick={() => openMatchDetail(m.id)}
-                              aria-label={`Match ${m.number}, ${branchLabel}, mot ${opponent}, ${calendarTimeLabel(m)}, ${st.label}`}
+                              aria-label={agendaAria}
                             >
                               <div className="calendar-agenda__date" aria-hidden>
                                 <span className="calendar-agenda__date-num">{dayNum}</span>
@@ -4467,7 +4484,14 @@ export default function App() {
                                   <span>{opponent}</span>
                                 </div>
                               </div>
-                              <div className="calendar-agenda__time">{calendarTimeLabel(m)}</div>
+                              <div className="calendar-agenda__meta-col">
+                                <div className="calendar-agenda__time">{calendarTimeLabel(m)}</div>
+                                {resultText ? (
+                                  <div className="calendar-agenda__result" aria-hidden>
+                                    {resultText}
+                                  </div>
+                                ) : null}
+                              </div>
                             </button>
                           </li>
                         );
@@ -4494,13 +4518,24 @@ export default function App() {
                                 const opponent = calendarOpponentName(match);
                                 const oppLogo = calendarOpponentLogo(match);
                                 const hasUpdate = (match.comments || []).length > 0 && match.status !== "played";
+                                const resultText = calendarMatchResultText(match);
+                                const eventTitle = [
+                                  `Match ${match.number}`,
+                                  branchLabel,
+                                  opponent,
+                                  calendarTimeLabel(match),
+                                  st.label,
+                                  resultText || null,
+                                ]
+                                  .filter(Boolean)
+                                  .join(" · ");
                                 return (
                                   <button
                                     key={match.id}
                                     type="button"
                                     className={`calendar-event calendar-event--${branchLabel.toLowerCase()}${activeMatchId === match.id ? " calendar-event--active" : ""}`}
                                     onClick={() => openMatchDetail(match.id)}
-                                    title={`Match ${match.number} · ${branchLabel} · ${opponent} · ${calendarTimeLabel(match)} · ${st.label}`}
+                                    title={eventTitle}
                                   >
                                     <div className="calendar-event__top">
                                       <span className={`calendar-match__dot ${st.cls}`} aria-hidden />
@@ -4512,7 +4547,10 @@ export default function App() {
                                       <span>{opponent}</span>
                                     </div>
                                     <div className="calendar-event__time">
-                                      {calendarTimeLabel(match)}
+                                      <span>{calendarTimeLabel(match)}</span>
+                                      {resultText ? (
+                                        <span className="calendar-event__result">{resultText}</span>
+                                      ) : null}
                                     </div>
                                   </button>
                                 );
