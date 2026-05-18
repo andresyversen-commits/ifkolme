@@ -192,7 +192,68 @@ export function isPlayerUnavailableForThisMatch(p, match) {
 }
 
 export function isPlayerSelectableForMatch(p, match) {
-  return !isPlayerUnavailableForThisMatch(p, match);
+  if (isPlayerUnavailableForThisMatch(p, match)) return false;
+  if (match) {
+    const declined = new Set(
+      (match.declinedPlayerIds || []).map((id) => String(id ?? "").trim()).filter(Boolean),
+    );
+    if (declined.has(String(p.id ?? ""))) return false;
+  }
+  return true;
+}
+
+/** 2015 i truppen som tackat nej eller är sjuka endast denna match. */
+export function match2015PlayersNeedingReplacement(match, state) {
+  const declined = new Set(
+    (match.declinedPlayerIds || []).map((id) => String(id ?? "").trim()).filter(Boolean),
+  );
+  const unavail = matchUnavailablePlayerIdSet(match);
+  const out = [];
+  for (const raw of match.selectedPlayerIds || []) {
+    const id = String(raw ?? "").trim();
+    if (!id) continue;
+    const pl = state.players.find((p) => String(p.id) === id);
+    if (!pl || birthYearNum(pl) !== 2015) continue;
+    if (declined.has(id) || unavail.has(id)) out.push(pl);
+  }
+  return out;
+}
+
+export function buildSquadWith2015Replacements(match, state, replacementIds) {
+  const need = match2015PlayersNeedingReplacement(match, state);
+  const needIds = new Set(need.map((p) => p.id));
+  const repl = [...new Set(replacementIds.map((id) => String(id ?? "").trim()).filter(Boolean))];
+  if (repl.length !== need.length) {
+    throw new Error("replacement_2015_wrong_count");
+  }
+  const active2015 = new Set(
+    (match.selectedPlayerIds || [])
+      .map((id) => String(id ?? "").trim())
+      .filter((id) => {
+        if (!id || needIds.has(id)) return false;
+        const pl = state.players.find((p) => String(p.id) === id);
+        return pl && birthYearNum(pl) === 2015;
+      }),
+  );
+  for (const id of repl) {
+    const pl = state.players.find((p) => String(p.id) === id);
+    if (!pl || birthYearNum(pl) !== 2015 || !isPlayerSelectableForMatch(pl, match)) {
+      throw new Error("replacement_2015_invalid");
+    }
+    if (active2015.has(id)) throw new Error("replacement_2015_already_in_squad");
+  }
+  const removeIds = needIds;
+  return [
+    ...(match.selectedPlayerIds || []).map((id) => String(id ?? "").trim()).filter((id) => id && !removeIds.has(id)),
+    ...repl,
+  ];
+}
+
+export function pruneDeclinedNotInSquad(match) {
+  const sel = new Set((match.selectedPlayerIds || []).map((id) => String(id ?? "").trim()).filter(Boolean));
+  match.declinedPlayerIds = (match.declinedPlayerIds || [])
+    .map((id) => String(id ?? "").trim())
+    .filter((id) => sel.has(id));
 }
 
 export function pruneMatchUnavailableToSquad(match) {
@@ -710,7 +771,6 @@ export function selectTeamForMatch(state, matchId, opts = {}) {
   const match = state.matches.find((m) => m.id === matchId);
   if (!match) throw new Error("match_not_found");
   if (match.status === "played") throw new Error("match_already_played");
-  match.declinedPlayerIds = [];
 
   repairGroups2015IfNeeded(state);
   repairGroups2016IfNeeded(state);
@@ -745,6 +805,7 @@ export function selectTeamForMatch(state, matchId, opts = {}) {
     match.selectedPlayerIds = appendP11Bench2014Players(state, [...ids2015, ...ids2016Pick]);
     pruneMatchUnavailableToSquad(match);
     pruneMatchLineupToSelectedSquad(match);
+    pruneDeclinedNotInSquad(match);
 
     const g15 = groupLabel(scheduledGroup2015);
     const g16 = groupLabel(match.intendedGroup2016);
@@ -775,6 +836,7 @@ export function selectTeamForMatch(state, matchId, opts = {}) {
     match.selectedPlayerIds = appendP11Bench2014Players(state, [...ids]);
     pruneMatchUnavailableToSquad(match);
     pruneMatchLineupToSelectedSquad(match);
+    pruneDeclinedNotInSquad(match);
     const gLabel = groupLabel(scheduledGroup);
     const text2015 = `P 11-serie: alla tillgängliga spelare födda 2015 tas ut. Omgången räknas i rotation som ${gLabel}.`;
     const text2016 = "P 11-serie: inga spelare födda 2016 tas ut i den här matchen.";
@@ -806,6 +868,7 @@ export function selectTeamForMatch(state, matchId, opts = {}) {
   match.selectedPlayerIds = [...ids2015, ...ids2016];
   pruneMatchUnavailableToSquad(match);
   pruneMatchLineupToSelectedSquad(match);
+  pruneDeclinedNotInSquad(match);
 
   const gLabel = groupLabel(scheduledGroup);
   const text2015 = usedOverride

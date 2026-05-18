@@ -31,6 +31,9 @@ import {
   pruneMatchLineupToSelectedSquad,
   pruneMatchUnavailableToSquad,
   validateMatchSquadForComplete,
+  buildSquadWith2015Replacements,
+  match2015PlayersNeedingReplacement,
+  pruneDeclinedNotInSquad,
 } from "./selection.mjs";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -1490,33 +1493,81 @@ app.put("/api/matches/:id/lineup", async (req, res) => {
   res.json(jsonState(state));
 });
 
-/** Korrigera trupp för redan spelad match (uppdaterar statistik). */
-app.put("/api/matches/:id/squad", async (req, res) => {
-  const state = await readState();
-  const match = state.matches.find((m) => m.id === req.params.id);
-  if (!match) return res.status(404).json({ error: "Match hittades inte" });
-  if (match.status !== "played") {
-    return res.status(400).json({ error: "Efterhandsändring av trupp gäller bara spelade matcher." });
-  }
-  const raw = req.body?.selectedPlayerIds;
-  if (!Array.isArray(raw)) return res.status(400).json({ error: "Ogiltig trupp" });
-  const uniq = [...new Set(raw.map((id) => String(id ?? "").trim()).filter(Boolean))];
+async function applyMatchSquadUpdate(state, match, uniq) {
   const p11Complete = (match.branch || "p10") === "p11";
   const selectedPlayerIds = p11Complete ? appendP11Bench2014Players(state, uniq) : uniq;
 
   const squadValidation = validateMatchSquadForComplete(state, match, selectedPlayerIds);
-  if (!squadValidation.ok) return res.status(400).json({ error: squadValidation.error });
+  if (!squadValidation.ok) return { error: squadValidation.error };
 
   match.selectedPlayerIds = selectedPlayerIds;
   const selSet = new Set(selectedPlayerIds.map(String));
   if (Array.isArray(match.declinedPlayerIds)) {
-    match.declinedPlayerIds = match.declinedPlayerIds.filter((id) => !selSet.has(String(id)));
+    match.declinedPlayerIds = match.declinedPlayerIds.filter((id) => selSet.has(String(id)));
   }
   pruneMatchUnavailableToSquad(match);
   pruneMatchLineupToSelectedSquad(match);
-  reconcilePlayerStats(state);
+  pruneDeclinedNotInSquad(match);
+  if (match.status === "played") reconcilePlayerStats(state);
+  return { ok: true };
+}
+
+/** Korrigera trupp (spelad match) eller justera urval (kommande match). */
+app.put("/api/matches/:id/squad", async (req, res) => {
+  const state = await readState();
+  const match = state.matches.find((m) => m.id === req.params.id);
+  if (!match) return res.status(404).json({ error: "Match hittades inte" });
+  if (match.status === "played" || match.status === "not_played") {
+    // ok
+  } else {
+    return res.status(400).json({ error: "Truppen kan inte ändras för denna matchstatus." });
+  }
+  const raw = req.body?.selectedPlayerIds;
+  if (!Array.isArray(raw)) return res.status(400).json({ error: "Ogiltig trupp" });
+  const uniq = [...new Set(raw.map((id) => String(id ?? "").trim()).filter(Boolean))];
+  const result = await applyMatchSquadUpdate(state, match, uniq);
+  if (result.error) return res.status(400).json({ error: result.error });
   await writeState(state);
   res.json(jsonState(state));
+});
+
+/** Byt ut födda 2015 som tackat nej eller är sjuka i truppen. */
+app.post("/api/matches/:id/squad/replace-2015", async (req, res) => {
+  try {
+    const state = await readState();
+    const match = state.matches.find((m) => m.id === req.params.id);
+    if (!match) return res.status(404).json({ error: "Match hittades inte" });
+    if (match.status === "played") {
+      return res.status(400).json({ error: "Byt 2015-ersättare innan matchen markeras som genomförd." });
+    }
+    if (!match.selectedPlayerIds?.length) {
+      return res.status(400).json({ error: "Välj lag först." });
+    }
+    const need = match2015PlayersNeedingReplacement(match, state);
+    if (!need.length) {
+      return res.status(400).json({ error: "Ingen född 2015 i truppen behöver ersättas." });
+    }
+    const replacementPlayerIds = req.body?.replacementPlayerIds;
+    if (!Array.isArray(replacementPlayerIds)) {
+      return res.status(400).json({ error: "Ogiltigt ersättarurval." });
+    }
+    const newSelected = buildSquadWith2015Replacements(match, state, replacementPlayerIds);
+    const result = await applyMatchSquadUpdate(state, match, newSelected);
+    if (result.error) return res.status(400).json({ error: result.error });
+    await writeState(state);
+    res.json(jsonState(state));
+  } catch (e) {
+    if (e.message === "replacement_2015_wrong_count") {
+      return res.status(400).json({ error: "Välj rätt antal ersättare födda 2015." });
+    }
+    if (e.message === "replacement_2015_invalid") {
+      return res.status(400).json({ error: "Ogiltig ersättare (måste vara tillgänglig född 2015)." });
+    }
+    if (e.message === "replacement_2015_already_in_squad") {
+      return res.status(400).json({ error: "Spelaren ingår redan i truppen." });
+    }
+    return res.status(500).json({ error: e.message });
+  }
 });
 
 app.delete("/api/players/:id", async (req, res) => {

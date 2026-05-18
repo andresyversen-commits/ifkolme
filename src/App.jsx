@@ -13,6 +13,7 @@ import {
   playerCountsAsPlayedInMatchForTeamScope,
   playerMatchParticipationKind,
   isPlayerSelectableForMatch,
+  match2015PlayersNeedingReplacement,
   matchUnavailablePlayerIdSet,
   isEligibleForMatchSquad,
   isAllowedP11SquadPlayer,
@@ -1912,6 +1913,38 @@ function MatchCard({
       if (a.birthYear !== b.birthYear) return a.birthYear - b.birthYear;
       return a.name.localeCompare(b.name, "sv");
     });
+  const replaceable2015 = useMemo(
+    () => match2015PlayersNeedingReplacement(m, state),
+    [m, state],
+  );
+  const replaceable2015Key = replaceable2015.map((p) => p.id).join(",");
+  const replacementPool2015 = useMemo(() => {
+    const active2015 = new Set(
+      selectedRowsAll
+        .filter(
+          (p) =>
+            birthYearNum(p) === 2015 &&
+            !declinedSet.has(p.id) &&
+            !matchUnavailablePlayerIdSet(m).has(p.id),
+        )
+        .map((p) => p.id),
+    );
+    return players2015
+      .filter((p) => isPlayerSelectableForMatch(p, m) && !active2015.has(p.id))
+      .sort((a, b) => a.name.localeCompare(b.name, "sv"));
+  }, [selectedRowsAll, players2015, m, declinedSet]);
+  const [replacement2015Ids, setReplacement2015Ids] = useState([]);
+  const [replacementBusy, setReplacementBusy] = useState(false);
+  useEffect(() => {
+    setReplacement2015Ids([]);
+  }, [m.id, replaceable2015Key]);
+  const toggleReplacement2015 = (id) => {
+    setReplacement2015Ids((prev) => {
+      if (prev.includes(id)) return prev.filter((x) => x !== id);
+      if (prev.length >= replaceable2015.length) return prev;
+      return [...prev, id];
+    });
+  };
   const playedSquadEditorCandidates = useMemo(() => {
     if (m.status !== "played") return [];
     return [...state.players]
@@ -2296,6 +2329,69 @@ function MatchCard({
               <p className="text-muted" style={{ marginTop: 8 }}>
                 Tackar nej till matchen: {declinedRows.map((p) => `${p.name} (${p.birthYear})`).join(", ")}
               </p>
+            ) : null}
+            {m.status !== "played" && squadMode === "mixed" && replaceable2015.length > 0 ? (
+              <div className="squad-replace-2015" style={{ marginTop: 14 }}>
+                <h4 className="panel__title" style={{ fontSize: 15, margin: "0 0 6px" }}>
+                  Ersätt födda 2015
+                </h4>
+                <p className="text-muted" style={{ margin: "0 0 10px", fontSize: 14 }}>
+                  Byt ut{" "}
+                  {replaceable2015.map((p) => p.name).join(", ")}. Välj{" "}
+                  <strong>{replaceable2015.length}</strong> ersättare nedan.
+                </p>
+                <div className="cb-grid">
+                  {replacementPool2015.map((p) => (
+                    <label key={p.id} className="cb-row" style={{ cursor: "pointer" }}>
+                      <input
+                        type="checkbox"
+                        checked={replacement2015Ids.includes(p.id)}
+                        disabled={
+                          !replacement2015Ids.includes(p.id) &&
+                          replacement2015Ids.length >= replaceable2015.length
+                        }
+                        onChange={() => toggleReplacement2015(p.id)}
+                      />
+                      <span>
+                        {p.name}{" "}
+                        <span style={{ color: "var(--text-secondary)" }}>({p.birthYear})</span>
+                      </span>
+                    </label>
+                  ))}
+                </div>
+                {replacementPool2015.length === 0 ? (
+                  <p className="text-muted" style={{ fontSize: 14 }}>
+                    Inga tillgängliga ersättare födda 2015 hittades.
+                  </p>
+                ) : null}
+                <button
+                  type="button"
+                  className="btn btn--secondary btn--sm"
+                  style={{ marginTop: 10 }}
+                  disabled={
+                    replacementBusy ||
+                    replacement2015Ids.length !== replaceable2015.length ||
+                    replacementPool2015.length === 0
+                  }
+                  onClick={async () => {
+                    setErr("");
+                    setReplacementBusy(true);
+                    try {
+                      await api(`/api/matches/${m.id}/squad/replace-2015`, {
+                        method: "POST",
+                        body: { replacementPlayerIds: replacement2015Ids },
+                      });
+                      await load({ silent: true });
+                    } catch (x) {
+                      setErr(x.message);
+                    } finally {
+                      setReplacementBusy(false);
+                    }
+                  }}
+                >
+                  {replacementBusy ? "Sparar…" : "Spara ersättare"}
+                </button>
+              </div>
             ) : null}
             {m.status === "played" && playedSquadEditorCandidates.length > 0 ? (
               <div className="played-squad-editor" style={{ marginTop: 14, borderTop: "1px solid var(--border-subtle)", paddingTop: 12 }}>
@@ -2697,12 +2793,22 @@ function MatchCard({
               onChange={(e) => {
                 const on = e.target.checked;
                 setShowManual(on);
-                if (on && rotationView?.canonical2015Ids?.length) {
-                  const avail = rotationView.canonical2015Ids.filter((id) => {
-                    const pl = players2015.find((x) => x.id === id);
-                    return pl && isPlayerSelectableForMatch(pl, m);
-                  });
-                  setManualIds(avail.length ? [...avail] : []);
+                if (on) {
+                  const currentActive2015 = (m.selectedPlayerIds || [])
+                    .map((id) => players2015.find((x) => x.id === id))
+                    .filter((pl) => pl && isPlayerSelectableForMatch(pl, m))
+                    .map((pl) => pl.id);
+                  if (currentActive2015.length) {
+                    setManualIds(currentActive2015.slice(0, 3));
+                  } else if (rotationView?.canonical2015Ids?.length) {
+                    const avail = rotationView.canonical2015Ids.filter((id) => {
+                      const pl = players2015.find((x) => x.id === id);
+                      return pl && isPlayerSelectableForMatch(pl, m);
+                    });
+                    setManualIds(avail.length ? [...avail] : []);
+                  } else {
+                    setManualIds([]);
+                  }
                 } else if (!on) {
                   setManualIds([]);
                 }
