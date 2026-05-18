@@ -996,6 +996,38 @@ function formatFixtureDateSv(isoDate) {
   return dt.toLocaleDateString("sv-SE", { weekday: "short", day: "numeric", month: "short" });
 }
 
+function fixtureToDraft(fixture) {
+  const time = String(fixture?.time || "");
+  return {
+    series: String(fixture?.series || ""),
+    association: String(fixture?.association || ""),
+    date: String(fixture?.date || ""),
+    time: time === "00:00" ? "" : time.slice(0, 5),
+    venue: String(fixture?.venue || ""),
+    home: String(fixture?.home || fixture?.homeTeam || ""),
+    away: String(fixture?.away || fixture?.awayTeam || ""),
+    p11Assist2016: String(fixture?.p11Assist2016 ?? 0),
+  };
+}
+
+function buildFixtureSaveBody(draft, { includeP11Assist = false } = {}) {
+  const trimmedTime = String(draft.time || "").trim();
+  const body = {
+    series: String(draft.series || "").trim(),
+    association: String(draft.association || "").trim(),
+    date: String(draft.date || "").trim(),
+    time: trimmedTime || "00:00",
+    venue: String(draft.venue || "").trim(),
+    home: String(draft.home || "").trim(),
+    away: String(draft.away || "").trim(),
+  };
+  if (includeP11Assist) {
+    const n = Math.floor(Number(draft.p11Assist2016));
+    body.p11Assist2016 = Number.isFinite(n) ? Math.max(0, Math.min(20, n)) : 0;
+  }
+  return body;
+}
+
 function fixtureOpponentLabel(m) {
   const home = String(m.fixture?.home || m.fixture?.homeTeam || "").trim();
   const away = String(m.fixture?.away || m.fixture?.awayTeam || "").trim();
@@ -1248,6 +1280,146 @@ function MinFotbollFixture({ fixture, getStoredTeamLogo }) {
           <FixtureCrest name={awayTeam} logoUrl={awayLogo} />
           <span className="fixture-block__club">{awayTeam || "Bortalag"}</span>
         </div>
+      </div>
+    </div>
+  );
+}
+
+function MatchFixtureEditor({ matchId, fixture, isP11Series, onSaved, setErr }) {
+  const [draft, setDraft] = useState(() => fixtureToDraft(fixture));
+  const [busy, setBusy] = useState(false);
+
+  useEffect(() => {
+    setDraft(fixtureToDraft(fixture));
+  }, [matchId, fixture]);
+
+  const setField = (key, value) => setDraft((prev) => ({ ...prev, [key]: value }));
+
+  const save = async () => {
+    const date = draft.date.trim();
+    if (!date) {
+      setErr("Ange ett datum.");
+      return;
+    }
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) {
+      setErr("Datum ska vara på formen ÅÅÅÅ-MM-DD.");
+      return;
+    }
+    setBusy(true);
+    setErr("");
+    try {
+      await api(`/api/matches/${matchId}/fixture`, {
+        method: "PUT",
+        body: buildFixtureSaveBody(draft, { includeP11Assist: isP11Series }),
+      });
+      await onSaved();
+    } catch (x) {
+      setErr(x.message);
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  return (
+    <div className="fixture-editor">
+      <p className="text-muted fixture-editor__hint">
+        Ändra datum, tid, plan eller lag om schemat i MinFotboll inte stämmer. Tom tid visas som TBD.
+      </p>
+      <div className="fixture-editor__grid">
+        <label className="field">
+          <span className="field__label">Datum</span>
+          <input
+            type="date"
+            className="field__input"
+            value={draft.date}
+            onChange={(e) => setField("date", e.target.value)}
+          />
+        </label>
+        <label className="field">
+          <span className="field__label">Tid</span>
+          <input
+            type="time"
+            className="field__input"
+            value={draft.time}
+            onChange={(e) => setField("time", e.target.value)}
+          />
+        </label>
+        <label className="field fixture-editor__field--wide">
+          <span className="field__label">Plan</span>
+          <input
+            type="text"
+            className="field__input"
+            value={draft.venue}
+            onChange={(e) => setField("venue", e.target.value)}
+            placeholder="t.ex. Kanalplan"
+          />
+        </label>
+        <label className="field">
+          <span className="field__label">Hemmalag</span>
+          <input
+            type="text"
+            className="field__input"
+            value={draft.home}
+            onChange={(e) => setField("home", e.target.value)}
+          />
+        </label>
+        <label className="field">
+          <span className="field__label">Bortalag</span>
+          <input
+            type="text"
+            className="field__input"
+            value={draft.away}
+            onChange={(e) => setField("away", e.target.value)}
+          />
+        </label>
+        <label className="field fixture-editor__field--wide">
+          <span className="field__label">Serie</span>
+          <input
+            type="text"
+            className="field__input"
+            value={draft.series}
+            onChange={(e) => setField("series", e.target.value)}
+            placeholder="t.ex. P 10 GRÖN 2026"
+          />
+        </label>
+        <label className="field fixture-editor__field--wide">
+          <span className="field__label">Förbund</span>
+          <input
+            type="text"
+            className="field__input"
+            value={draft.association}
+            onChange={(e) => setField("association", e.target.value)}
+          />
+        </label>
+        {isP11Series ? (
+          <label className="field">
+            <span className="field__label">Antal födda 2016 (assist)</span>
+            <input
+              type="number"
+              min={0}
+              max={20}
+              className="field__input"
+              value={draft.p11Assist2016}
+              onChange={(e) => setField("p11Assist2016", e.target.value)}
+            />
+          </label>
+        ) : null}
+      </div>
+      <div className="fixture-editor__actions">
+        <button type="button" className="btn btn--primary" onClick={save} disabled={busy}>
+          {busy ? "Sparar…" : "Spara matchinfo"}
+        </button>
+        <button
+          type="button"
+          className="btn btn--secondary"
+          disabled={busy}
+          onClick={() => {
+            setDraft(fixtureToDraft(fixture));
+            setErr("");
+          }}
+        >
+          Återställ
+        </button>
       </div>
     </div>
   );
@@ -1537,7 +1709,6 @@ function MatchCard({
   const [manualIds, setManualIds] = useState([]);
   const [showManual2016, setShowManual2016] = useState(false);
   const [manual2016Ids, setManual2016Ids] = useState([]);
-  const [assistDraft, setAssistDraft] = useState(() => String(m.fixture?.p11Assist2016 ?? 0));
   const [commentName, setCommentName] = useState(() => coachNames[0] || "Jonas");
   const [commentText, setCommentText] = useState("");
   const [editingCommentId, setEditingCommentId] = useState("");
@@ -1563,9 +1734,6 @@ function MatchCard({
   const [playedSquadDraftIds, setPlayedSquadDraftIds] = useState([]);
   const [playedSquadBusy, setPlayedSquadBusy] = useState(false);
 
-  useEffect(() => {
-    setAssistDraft(String(m.fixture?.p11Assist2016 ?? 0));
-  }, [m.fixture?.p11Assist2016, m.id]);
   useEffect(() => {
     const lineupSig = JSON.stringify({
       id: m.id,
@@ -1945,7 +2113,18 @@ function MatchCard({
 
   return (
     <article className="match-card">
-      {m.fixture ? <MinFotbollFixture fixture={m.fixture} getStoredTeamLogo={getStoredTeamLogo} /> : null}
+      {m.fixture ? (
+        <div className="match-card__fixture-wrap">
+          <MinFotbollFixture fixture={m.fixture} getStoredTeamLogo={getStoredTeamLogo} />
+          <button
+            type="button"
+            className="btn btn--plain fixture-block__edit-btn"
+            onClick={() => setMatchSubTab("fixture")}
+          >
+            Redigera matchinfo
+          </button>
+        </div>
+      ) : null}
       <div className="match-card__inner">
       <div className="match-card__head match-card__headrow">
         <h3 className="match-card__label">
@@ -2030,6 +2209,15 @@ function MatchCard({
           type="button"
           role="tab"
           className="segmented__btn"
+          aria-selected={matchSubTab === "fixture"}
+          onClick={() => setMatchSubTab("fixture")}
+        >
+          Matchinfo
+        </button>
+        <button
+          type="button"
+          role="tab"
+          className="segmented__btn"
           aria-selected={matchSubTab === "squad"}
           onClick={() => setMatchSubTab("squad")}
         >
@@ -2056,6 +2244,18 @@ function MatchCard({
           </button>
         ) : null}
       </div>
+
+      {matchSubTab === "fixture" && m.fixture ? (
+        <div className="match-card__body">
+          <MatchFixtureEditor
+            matchId={m.id}
+            fixture={m.fixture}
+            isP11Series={isP11Series}
+            setErr={setErr}
+            onSaved={() => load({ silent: true })}
+          />
+        </div>
+      ) : null}
 
       {matchSubTab === "squad" && <div className="match-card__body">
         {m.selectedPlayerIds.length > 0 ? (
@@ -2486,35 +2686,6 @@ function MatchCard({
           )}
         </div>
       </div>
-      )}
-
-      {matchSubTab === "squad" && m.status !== "played" && isP11Series && (
-        <div style={{ marginBottom: 12 }}>
-          <label style={{ fontSize: 15, display: "flex", flexWrap: "wrap", alignItems: "center", gap: 8 }}>
-            Antal födda 2016 (P 11-assist)
-            <input
-              type="number"
-              min={0}
-              max={20}
-              className="field__select"
-              style={{ width: 88 }}
-              value={assistDraft}
-              onChange={(e) => setAssistDraft(e.target.value)}
-              onBlur={async () => {
-                const n = Math.floor(Number(assistDraft));
-                const v = Number.isFinite(n) ? Math.max(0, Math.min(20, n)) : 0;
-                setAssistDraft(String(v));
-                setErr("");
-                try {
-                  await api(`/api/matches/${m.id}/fixture`, { method: "PUT", body: { p11Assist2016: v } });
-                  await load();
-                } catch (x) {
-                  setErr(x.message);
-                }
-              }}
-            />
-          </label>
-        </div>
       )}
 
       {matchSubTab === "squad" && m.status !== "played" && squadMode === "mixed" && (

@@ -538,16 +538,36 @@ function loadSeedState() {
   }
 }
 
+const SEED_FIXTURE_KEYS = ["series", "association", "date", "time", "venue", "home", "away"];
+
+function mergeSeedFixtureIntoMatch(existing, seedFixture) {
+  if (!seedFixture || typeof seedFixture !== "object") return false;
+  if (!existing.fixture || typeof existing.fixture !== "object") existing.fixture = {};
+  let changed = false;
+  for (const key of SEED_FIXTURE_KEYS) {
+    const seedVal = seedFixture[key];
+    if (seedVal == null || seedVal === "") continue;
+    if (existing.fixture[key] !== seedVal) {
+      existing.fixture[key] = seedVal;
+      changed = true;
+    }
+  }
+  return changed;
+}
+
 function ensureMinimumScheduleFromSeed(state) {
   const seed = loadSeedState();
   if (!seed) return false;
   let dirty = false;
-  const has = new Set((state.matches || []).map((m) => m.id));
+  const byId = new Map((state.matches || []).map((m) => [m.id, m]));
   for (const sm of seed.matches || []) {
-    if (!has.has(sm.id)) {
+    const existing = byId.get(sm.id);
+    if (!existing) {
       state.matches.push(JSON.parse(JSON.stringify(sm)));
       dirty = true;
+      continue;
     }
+    if (mergeSeedFixtureIntoMatch(existing, sm.fixture)) dirty = true;
   }
   const p11Count = (state.matches || []).filter((m) => m.branch === "p11").length;
   if (p11Count === 0 && Array.isArray(seed.fixturesP11) && seed.fixturesP11.length > 0) {
@@ -1382,10 +1402,17 @@ app.put("/api/matches/:id/fixture", async (req, res) => {
     if (key === "p11Assist2016") {
       const n = Math.floor(Number(body.p11Assist2016));
       match.fixture.p11Assist2016 = Number.isFinite(n) ? Math.max(0, Math.min(20, n)) : 0;
+    } else if (key === "date") {
+      const d = String(body.date).trim();
+      if (!/^\d{4}-\d{2}-\d{2}$/.test(d)) {
+        return res.status(400).json({ error: "Ogiltigt datum (ÅÅÅÅ-MM-DD)." });
+      }
+      match.fixture.date = d;
     } else {
-      match.fixture[key] = body[key];
+      match.fixture[key] = String(body[key] ?? "").trim();
     }
   }
+  state.matches.sort(compareMatchesChronologically);
   await writeState(state);
   res.json(jsonState(state));
 });

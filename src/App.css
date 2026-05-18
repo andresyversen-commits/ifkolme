@@ -2696,6 +2696,21 @@ body {
 }
 
 /* Seriekort (samma storlek P10 / P11) */
+.match-card__fixture-wrap {
+  position: relative;
+}
+
+.fixture-block__edit-btn {
+  position: absolute;
+  top: 10px;
+  right: 10px;
+  min-height: 32px;
+  padding: 4px 10px;
+  font-size: 12px;
+  font-weight: 600;
+  z-index: 1;
+}
+
 .fixture-block {
   background: var(--muted);
   border-bottom: 1px solid var(--border);
@@ -2845,6 +2860,44 @@ body {
   font-weight: 600;
   font-style: italic;
   color: var(--muted-foreground);
+}
+
+.fixture-editor {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+
+.fixture-editor__hint {
+  margin: 0;
+  font-size: 14px;
+  line-height: 1.45;
+}
+
+.fixture-editor__grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 12px 14px;
+}
+
+.fixture-editor__field--wide {
+  grid-column: 1 / -1;
+}
+
+.fixture-editor__actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+}
+
+@media (max-width: 520px) {
+  .fixture-editor__grid {
+    grid-template-columns: 1fr;
+  }
+
+  .fixture-editor__field--wide {
+    grid-column: auto;
+  }
 }
 
 @media (max-width: 480px) {
