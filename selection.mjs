@@ -268,6 +268,25 @@ export function pruneMatchUnavailableToSquad(match) {
   );
 }
 
+/** Tar bort match-specifik frånvaro (påverkar inte global available på spelaren). */
+export function clearMatchUnavailableFlags(match) {
+  if (!match || !Array.isArray(match.unavailablePlayerIds) || match.unavailablePlayerIds.length === 0) {
+    return false;
+  }
+  match.unavailablePlayerIds = [];
+  return true;
+}
+
+/** Genomförda matcher ska inte behålla match-frånvaro — den gäller bara innan/under planering. */
+export function repairClearUnavailableOnPlayedMatches(state) {
+  let dirty = false;
+  for (const m of state.matches || []) {
+    if (m.status !== "played") continue;
+    if (clearMatchUnavailableFlags(m)) dirty = true;
+  }
+  return dirty;
+}
+
 /** PRNG med fast frö — reproducerbar säsongssimulering. */
 export function makeRng(seed = 0x9e3779b9) {
   let s = seed >>> 0;

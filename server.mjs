@@ -34,6 +34,8 @@ import {
   buildSquadWith2015Replacements,
   match2015PlayersNeedingReplacement,
   pruneDeclinedNotInSquad,
+  clearMatchUnavailableFlags,
+  repairClearUnavailableOnPlayedMatches,
 } from "./selection.mjs";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -1033,6 +1035,7 @@ async function readState() {
   if (applyRemoteSettingsIfNeeded(data)) dirty = true;
   if (reconcilePlayerStats(data)) dirty = true;
   if (backfillIntendedGroups2015(data)) dirty = true;
+  if (repairClearUnavailableOnPlayedMatches(data)) dirty = true;
   if (dirty || bootstrappedFromFallback) await writeState(data);
   return data;
 }
@@ -1051,6 +1054,7 @@ function normalizeImportedState(raw) {
   migrateStateShape(data);
   reconcilePlayerStats(data);
   backfillIntendedGroups2015(data);
+  repairClearUnavailableOnPlayedMatches(data);
   if (!validateGroups2015(data)) throw new Error("groups2015_invalid");
   if (!validateGroups2016(data)) throw new Error("groups2016_invalid");
   // Keep testLab separate from core backup by default.
@@ -1673,6 +1677,7 @@ app.post("/api/matches/:id/complete", async (req, res) => {
   match.matchReport = normalizedReport;
 
   match.status = "played";
+  clearMatchUnavailableFlags(match);
   reconcilePlayerStats(state);
   await writeState(state);
   res.json(jsonState(state));
@@ -1717,12 +1722,14 @@ app.put("/api/matches/:id/unavailable", async (req, res) => {
   const state = await readState();
   const match = state.matches.find((m) => m.id === req.params.id);
   if (!match) return res.status(404).json({ error: "Match hittades inte" });
-  if (match.status === "played") return res.status(400).json({ error: "Matchen är redan genomförd" });
   const playerId = String(req.body?.playerId || "").trim();
   if (!playerId) return res.status(400).json({ error: "Spelar-ID saknas" });
   const pl = state.players.find((p) => p.id === playerId);
   if (!pl) return res.status(404).json({ error: "Spelaren hittades inte" });
   const unavailable = Boolean(req.body?.unavailable);
+  if (match.status === "played" && unavailable) {
+    return res.status(400).json({ error: "Matchen är redan genomförd — frånvaro kan inte läggas till." });
+  }
   if (!Array.isArray(match.unavailablePlayerIds)) match.unavailablePlayerIds = [];
   const set = new Set(match.unavailablePlayerIds);
   if (unavailable) {

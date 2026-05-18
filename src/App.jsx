@@ -2122,10 +2122,12 @@ function MatchCard({
           method: "PUT",
           body: { playerId: player.id, unavailable: false },
         });
-        await api(`/api/players/${player.id}`, {
-          method: "PUT",
-          body: { available: true },
-        });
+        if (player.available === false) {
+          await api(`/api/players/${player.id}`, {
+            method: "PUT",
+            body: { available: true },
+          });
+        }
         if (declinedSet.has(player.id)) {
           await api(`/api/matches/${m.id}/decline`, {
             method: "PUT",
@@ -2320,10 +2322,32 @@ function MatchCard({
               }}
             />
             {sickInSquadRows.length > 0 ? (
-              <p className="text-muted" style={{ marginTop: 8 }}>
-                Sjuk / frånvaro i truppen:{" "}
-                {sickInSquadRows.map((p) => `${p.name} (${p.birthYear})`).join(", ")}
-              </p>
+              <div className="squad-sick-notice" style={{ marginTop: 8 }}>
+                <p className="text-muted" style={{ margin: "0 0 8px" }}>
+                  Sjuk / frånvaro i truppen (endast denna match):{" "}
+                  {sickInSquadRows.map((p) => `${p.name} (${p.birthYear})`).join(", ")}
+                </p>
+                {m.status !== "played" ? (
+                  <div className="squad-sick-notice__actions">
+                    {sickInSquadRows.map((p) => (
+                      <button
+                        key={p.id}
+                        type="button"
+                        className="btn btn--sm btn--secondary"
+                        onClick={() => {
+                          handleAttendanceAction(p, "clear_sick").catch(() => null);
+                        }}
+                      >
+                        Gör {p.name.split(" ")[0]} tillgänglig
+                      </button>
+                    ))}
+                  </div>
+                ) : (
+                  <p className="text-muted" style={{ margin: 0, fontSize: 13 }}>
+                    Match-frånvaro nollställs automatiskt när matchen markeras som genomförd.
+                  </p>
+                )}
+              </div>
             ) : null}
             {declinedRows.length > 0 ? (
               <p className="text-muted" style={{ marginTop: 8 }}>

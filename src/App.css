@@ -2890,6 +2890,12 @@ body {
   gap: 10px;
 }
 
+.squad-sick-notice__actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
 @media (max-width: 520px) {
   .fixture-editor__grid {
     grid-template-columns: 1fr;
