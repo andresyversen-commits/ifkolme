@@ -1714,6 +1714,25 @@ app.put("/api/matches/:id/decline", async (req, res) => {
   res.json(jsonState(state));
 });
 
+/** Sätt hela listan «tackade nej» (t.ex. i efterhand för genomförda matcher). */
+app.put("/api/matches/:id/declined-players", async (req, res) => {
+  const state = await readState();
+  const match = state.matches.find((m) => m.id === req.params.id);
+  if (!match) return res.status(404).json({ error: "Match hittades inte" });
+  const raw = req.body?.declinedPlayerIds;
+  if (!Array.isArray(raw)) return res.status(400).json({ error: "Ogiltig lista över spelare" });
+  const ids = [...new Set(raw.map((id) => String(id ?? "").trim()).filter(Boolean))];
+  for (const id of ids) {
+    if (!state.players.some((p) => String(p.id) === id)) {
+      return res.status(400).json({ error: "Truppen innehåller ogiltigt spelar-ID." });
+    }
+  }
+  match.declinedPlayerIds = ids;
+  if (match.status === "played") reconcilePlayerStats(state);
+  await writeState(state);
+  res.json(jsonState(state));
+});
+
 /** Frånvaro (sjuk m.m.) bara för denna match — påverkar inte nästa match. */
 app.put("/api/matches/:id/unavailable", async (req, res) => {
   const state = await readState();

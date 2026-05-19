@@ -1785,6 +1785,8 @@ function MatchCard({
   const [reportBusy, setReportBusy] = useState(false);
   const [playedSquadDraftIds, setPlayedSquadDraftIds] = useState([]);
   const [playedSquadBusy, setPlayedSquadBusy] = useState(false);
+  const [playedDeclinedDraftIds, setPlayedDeclinedDraftIds] = useState([]);
+  const [playedDeclinedBusy, setPlayedDeclinedBusy] = useState(false);
 
   useEffect(() => {
     const lineupSig = JSON.stringify({
@@ -1843,6 +1845,34 @@ function MatchCard({
     const merged = isP11Branch ? [...new Set([...base, ...sortedAllPlayerIds2014(state)])] : base;
     setPlayedSquadDraftIds(merged);
   }, [m.id, m.status, isP11Branch, playedSquadCanonicalSig]);
+
+  const playedDeclinedCanonicalSig = useMemo(() => {
+    return [...new Set((m.declinedPlayerIds || []).map((id) => String(id)))].sort().join(",");
+  }, [m.declinedPlayerIds]);
+
+  useEffect(() => {
+    if (m.status !== "played") return;
+    setPlayedDeclinedDraftIds([...(m.declinedPlayerIds || []).map((id) => String(id))]);
+  }, [m.id, m.status, playedDeclinedCanonicalSig]);
+
+  const playedDeclinedDraftSet = useMemo(
+    () => new Set(playedDeclinedDraftIds.map(String)),
+    [playedDeclinedDraftIds],
+  );
+  const playedDeclinedDraftSig = useMemo(
+    () => [...playedDeclinedDraftSet].sort().join(","),
+    [playedDeclinedDraftSet],
+  );
+
+  const togglePlayedDeclinedId = useCallback((playerId) => {
+    const sid = String(playerId);
+    setPlayedDeclinedDraftIds((prev) => {
+      const set = new Set(prev.map(String));
+      if (set.has(sid)) set.delete(sid);
+      else set.add(sid);
+      return [...set];
+    });
+  }, []);
 
   useEffect(() => {
     setMatchSubTab("squad");
@@ -2543,6 +2573,66 @@ function MatchCard({
                     }}
                   >
                     Spara trupp
+                  </button>
+                </div>
+              </div>
+            ) : null}
+            {m.status === "played" && playedSquadEditorCandidates.length > 0 ? (
+              <div className="played-squad-editor" style={{ marginTop: 14, borderTop: "1px solid var(--border-subtle)", paddingTop: 12 }}>
+                <h4 className="panel__title" style={{ fontSize: 15, margin: "0 0 8px" }}>
+                  Tackade nej (i efterhand)
+                </h4>
+                <p className="text-muted" style={{ marginBottom: 10, fontSize: 14 }}>
+                  Kryssa i spelare som tackade nej till den här matchen. Det uppdaterar statistik och spelarhistorik utan att
+                  ändra vem som räknas som deltagare.
+                </p>
+                <div className="lineup-player-grid" style={{ maxHeight: 220, overflowY: "auto", paddingRight: 4 }}>
+                  {playedSquadEditorCandidates.map((p) => {
+                    const sid = String(p.id);
+                    const checked = playedDeclinedDraftSet.has(sid);
+                    return (
+                      <label
+                        key={`played-declined-${p.id}`}
+                        className="field"
+                        style={{ flexDirection: "row", alignItems: "center", gap: 8, marginBottom: 0 }}
+                      >
+                        <input
+                          type="checkbox"
+                          checked={checked}
+                          disabled={playedDeclinedBusy}
+                          onChange={() => togglePlayedDeclinedId(p.id)}
+                        />
+                        <span>
+                          {p.name}{" "}
+                          <span style={{ color: "var(--text-secondary)" }}>({p.birthYear})</span>
+                        </span>
+                      </label>
+                    );
+                  })}
+                </div>
+                <div className="btn-row" style={{ marginTop: 10 }}>
+                  <button
+                    type="button"
+                    className="btn btn--secondary"
+                    disabled={playedDeclinedBusy || playedDeclinedDraftSig === playedDeclinedCanonicalSig}
+                    onClick={async () => {
+                      setPlayedDeclinedBusy(true);
+                      setErr("");
+                      try {
+                        const next = await api(`/api/matches/${m.id}/declined-players`, {
+                          method: "PUT",
+                          body: { declinedPlayerIds: playedDeclinedDraftIds },
+                        });
+                        await load({ silent: true, prefetched: next });
+                        if (typeof onCopied === "function") onCopied("Tackade nej sparade.");
+                      } catch (x) {
+                        setErr(x.message);
+                      } finally {
+                        setPlayedDeclinedBusy(false);
+                      }
+                    }}
+                  >
+                    {playedDeclinedBusy ? "Sparar…" : "Spara tackade nej"}
                   </button>
                 </div>
               </div>
