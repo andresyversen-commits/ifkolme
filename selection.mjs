@@ -142,8 +142,55 @@ export function repairP11Squad2014IfNeeded(state) {
   return dirty;
 }
 
+export function coercePlayerAvailableFlag(value) {
+  if (value === false || value === "false" || value === 0 || value === "0") return false;
+  if (value === true || value === "true" || value === 1 || value === "1") return true;
+  return value !== false;
+}
+
 export function isPlayerAvailable(p) {
-  return p && p.available !== false;
+  return Boolean(p) && coercePlayerAvailableFlag(p.available) !== false;
+}
+
+export function normalizePlayerAvailabilityFlags(player) {
+  if (!player || typeof player !== "object") return false;
+  let dirty = false;
+  const nextAvailable = coercePlayerAvailableFlag(player.available);
+  if (player.available !== nextAvailable) {
+    player.available = nextAvailable;
+    dirty = true;
+  }
+  if (player.available && player.unavailableReason) {
+    player.unavailableReason = null;
+    dirty = true;
+  }
+  if (!player.available && (player.unavailableReason === undefined || player.unavailableReason === null || player.unavailableReason === "")) {
+    player.unavailableReason = "sick";
+    dirty = true;
+  }
+  return dirty;
+}
+
+/** Gör spelaren tillgänglig på en match; valfritt även globalt och på alla kommande matcher. */
+export function applyPlayerMakeAvailable(state, matchId, playerId, opts = {}) {
+  const pid = String(playerId ?? "").trim();
+  if (!pid) throw new Error("player_id_missing");
+  const match = (state.matches || []).find((m) => String(m.id) === String(matchId));
+  if (!match) throw new Error("match_not_found");
+  const pl = (state.players || []).find((p) => String(p.id) === pid);
+  if (!pl) throw new Error("player_not_found");
+
+  clearPlayerAbsenceForMatch(match, pid);
+  const clearAllUpcoming = opts.clearAllUpcoming !== false;
+  if (clearAllUpcoming) clearPlayerAbsenceOnUpcomingMatches(state, pid);
+
+  const clearGlobal = opts.clearGlobal !== false;
+  if (clearGlobal) {
+    pl.available = true;
+    pl.unavailableReason = null;
+  }
+  normalizePlayerAvailabilityFlags(pl);
+  return { match, player: pl };
 }
 
 /** Spelare markerade sjuka/frånvarande bara för denna match (truppfliken). */

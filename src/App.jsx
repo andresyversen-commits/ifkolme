@@ -1109,6 +1109,61 @@ function parseMonthKey(key) {
   return { year: y, month: m - 1 };
 }
 
+function applyMakeAvailableToState(prev, { matchId = null, playerId, allUpcoming = false } = {}) {
+  if (!prev) return prev;
+  const pid = String(playerId ?? "").trim();
+  if (!pid) return prev;
+  return {
+    ...prev,
+    players: (prev.players || []).map((pl) =>
+      String(pl.id) === pid ? { ...pl, available: true, unavailableReason: null } : pl,
+    ),
+    matches: (prev.matches || []).map((m) => {
+      if (m.status === "played") return m;
+      if (allUpcoming) {
+        return {
+          ...m,
+          unavailablePlayerIds: (m.unavailablePlayerIds || []).filter((id) => String(id) !== pid),
+          declinedPlayerIds: (m.declinedPlayerIds || []).filter((id) => String(id) !== pid),
+        };
+      }
+      if (matchId == null || String(m.id) !== String(matchId)) return m;
+      return {
+        ...m,
+        unavailablePlayerIds: (m.unavailablePlayerIds || []).filter((id) => String(id) !== pid),
+        declinedPlayerIds: (m.declinedPlayerIds || []).filter((id) => String(id) !== pid),
+      };
+    }),
+  };
+}
+
+async function requestMakePlayerAvailable(matchId, player, matchSnapshot) {
+  try {
+    return await api(`/api/matches/${matchId}/players/${player.id}/make-available`, {
+      method: "POST",
+      body: { clearGlobal: true, clearAllUpcoming: true },
+    });
+  } catch (e) {
+    const msg = String(e.message || "");
+    if (!msg.includes("404") && !msg.toLowerCase().includes("not found")) throw e;
+    let next = await api(`/api/matches/${matchId}/unavailable`, {
+      method: "PUT",
+      body: { playerId: player.id, unavailable: false },
+    });
+    if (player.available === false) {
+      next = await api(`/api/players/${player.id}`, { method: "PUT", body: { available: true } });
+    }
+    const declined = (matchSnapshot?.declinedPlayerIds || []).includes(player.id);
+    if (declined) {
+      next = await api(`/api/matches/${matchId}/decline`, {
+        method: "PUT",
+        body: { playerId: player.id, declined: false },
+      });
+    }
+    return next;
+  }
+}
+
 /** Truppvisning: samma namn-/år-typografi som översikten, sorterat 2015 först. */
 function MatchLineupNames({
   playerIds,
@@ -1688,6 +1743,7 @@ function MatchCard({
   coachNames = [],
   onCopied,
   onMatchCompleted,
+  patchState,
   cardTitle = "Match",
   displayNumber,
   getStoredTeamLogo,
@@ -2115,14 +2171,16 @@ function MatchCard({
           body: { playerId: player.id, declined: true },
         });
       } else {
-        next = await api(`/api/matches/${m.id}/players/${player.id}/make-available`, {
-          method: "POST",
-          body: { clearGlobal: true },
-        });
+        if (typeof patchState === "function") {
+          patchState((prev) => applyMakeAvailableToState(prev, { matchId: m.id, playerId: player.id, allUpcoming: true }));
+        }
+        next = await requestMakePlayerAvailable(m.id, player, m);
       }
       await load({ silent: true, prefetched: next });
+      if (typeof onCopied === "function") onCopied("Spelaren är tillgänglig.");
     } catch (x) {
       setErr(x.message || "Kunde inte uppdatera tillgänglighet.");
+      await load({ silent: true });
     } finally {
       setAttendanceBusyId("");
     }
@@ -3933,7 +3991,6 @@ export default function App() {
         Namn: p.name,
         "Födelseår": p.birthYear,
         "Antal matcher": p.matchesPlayed,
-        "Senast spelad match": p.lastPlayedMatchNumber ?? "—",
       })),
     );
     const wsMatches = XLSX.utils.json_to_sheet(
@@ -4236,7 +4293,6 @@ export default function App() {
                       <th><button type="button" className="players-sort-btn" onClick={() => togglePlayersSort("birthYear")}>{`År${sortMark("birthYear")}`}</button></th>
                       <th><button type="button" className="players-sort-btn" onClick={() => togglePlayersSort("group")}>{`Grupp${sortMark("group")}`}</button></th>
                       <th><button type="button" className="players-sort-btn" onClick={() => togglePlayersSort("matchesPlayed")}>{`Matcher${sortMark("matchesPlayed")}`}</button></th>
-                      <th><button type="button" className="players-sort-btn" onClick={() => togglePlayersSort("lastPlayedMatchNumber")}>{`Senast${sortMark("lastPlayedMatchNumber")}`}</button></th>
                       <th><button type="button" className="players-sort-btn" onClick={() => togglePlayersSort("available")}>{`Status${sortMark("available")}`}</button></th>
                       <th className="actions-cell" />
                     </tr>
@@ -4247,7 +4303,7 @@ export default function App() {
                         if (editingId === p.id) {
                           return (
                             <tr key={p.id} className="players-table__edit">
-                              <td colSpan={9} style={{ padding: "12px 14px", background: "var(--fill-secondary)" }}>
+                              <td colSpan={8} style={{ padding: "12px 14px", background: "var(--fill-secondary)" }}>
                                 <div className="form-add" style={{ marginBottom: 0 }}>
                                   <div className="field">
                                     <span className="field__label">Namn</span>
@@ -4352,7 +4408,6 @@ export default function App() {
                               )}
                             </td>
                             <td data-label="Matcher">{p.matchesPlayed}</td>
-                            <td data-label="Senast">{p.lastPlayedMatchNumber != null ? p.lastPlayedMatchNumber : "—"}</td>
                             <td data-label="Status">
                               {p.available === false ? (
                                 <span className="badge-avail badge-avail--no">Ej tillgänglig</span>
@@ -4369,15 +4424,22 @@ export default function App() {
                                     setErr("");
                                     const cur = p.available !== false;
                                     try {
+                                      if (cur) {
+                                        setState((prev) =>
+                                          applyMakeAvailableToState(prev, { playerId: p.id, allUpcoming: true }),
+                                        );
+                                      }
                                       const next = await api(`/api/players/${p.id}`, {
                                         method: "PUT",
                                         body: !cur
                                           ? { available: false, unavailableReason: "sick" }
                                           : { available: true },
                                       });
-                                      await load({ prefetched: next });
+                                      setState(() => next);
+                                      setOkMsg(cur ? "Spelaren är tillgänglig." : "Frånvaro registrerad.");
                                     } catch (x) {
                                       setErr(x.message);
+                                      await load({ silent: true });
                                     }
                                   }}
                                 >
@@ -4870,6 +4932,7 @@ export default function App() {
                     coachNames={coachNames}
                     onCopied={setOkMsg}
                     onMatchCompleted={handleMatchCompleted}
+                    patchState={setState}
                     cardTitle="Match"
                     displayNumber={activeMatch?.number}
                     getStoredTeamLogo={getStoredTeamLogo}

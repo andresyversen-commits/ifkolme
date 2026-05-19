@@ -36,8 +36,9 @@ import {
   pruneDeclinedNotInSquad,
   clearMatchUnavailableFlags,
   repairClearUnavailableOnPlayedMatches,
-  clearPlayerAbsenceForMatch,
   clearPlayerAbsenceOnUpcomingMatches,
+  applyPlayerMakeAvailable,
+  normalizePlayerAvailabilityFlags,
 } from "./selection.mjs";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -614,18 +615,7 @@ function migrateAvailability(data) {
         dirty = true;
       }
     }
-    if (p.unavailableReason !== undefined && p.unavailableReason !== null && typeof p.unavailableReason !== "string") {
-      p.unavailableReason = null;
-      dirty = true;
-    }
-    if (p.available !== false && p.unavailableReason) {
-      p.unavailableReason = null;
-      dirty = true;
-    }
-    if (p.available === false && (p.unavailableReason === undefined || p.unavailableReason === null || p.unavailableReason === "")) {
-      p.unavailableReason = "sick";
-      dirty = true;
-    }
+    if (normalizePlayerAvailabilityFlags(p)) dirty = true;
     if (p.available === undefined) {
       p.available = true;
       dirty = true;
@@ -1439,11 +1429,12 @@ app.put("/api/players/:id", async (req, res) => {
     p.birthYear = y;
   }
   if (available !== undefined && available !== null) {
-    p.available = Boolean(available);
+    p.available = available === true || available === "true" || available === 1 || available === "1";
     if (p.available) {
       p.unavailableReason = null;
       clearPlayerAbsenceOnUpcomingMatches(state, p.id);
     } else if (unavailableReason === undefined) p.unavailableReason = "sick";
+    normalizePlayerAvailabilityFlags(p);
   }
   if (unavailableReason !== undefined && unavailableReason !== null) {
     if (p.available) {
@@ -1746,23 +1737,29 @@ app.put("/api/matches/:id/unavailable", async (req, res) => {
   res.json(jsonState(state));
 });
 
-/** Gör spelaren tillgänglig för matchen (och valfritt hela truppen). */
-app.post("/api/matches/:matchId/players/:playerId/make-available", async (req, res) => {
-  const state = await readState();
-  const match = state.matches.find((m) => m.id === req.params.matchId);
-  if (!match) return res.status(404).json({ error: "Match hittades inte" });
-  const playerId = String(req.params.playerId || "").trim();
-  const pl = state.players.find((p) => String(p.id) === playerId);
-  if (!pl) return res.status(404).json({ error: "Spelaren hittades inte" });
-  clearPlayerAbsenceForMatch(match, playerId);
-  const clearGlobal = req.body?.clearGlobal !== false;
-  if (clearGlobal && pl.available === false) {
-    pl.available = true;
-    pl.unavailableReason = null;
+async function handleMakePlayerAvailable(req, res) {
+  try {
+    const state = await readState();
+    const matchId = String(req.params.matchId || req.params.id || "").trim();
+    const playerId = String(req.params.playerId || req.body?.playerId || "").trim();
+    applyPlayerMakeAvailable(state, matchId, playerId, {
+      clearGlobal: req.body?.clearGlobal !== false,
+      clearAllUpcoming: req.body?.clearAllUpcoming !== false,
+    });
+    await writeState(state);
+    res.json(jsonState(state));
+  } catch (e) {
+    if (e.message === "match_not_found") return res.status(404).json({ error: "Match hittades inte" });
+    if (e.message === "player_not_found") return res.status(404).json({ error: "Spelaren hittades inte" });
+    if (e.message === "player_id_missing") return res.status(400).json({ error: "Spelar-ID saknas" });
+    return res.status(500).json({ error: e.message });
   }
-  await writeState(state);
-  res.json(jsonState(state));
-});
+}
+
+/** Gör spelaren tillgänglig för matchen (och alla kommande matcher). */
+app.post("/api/matches/:matchId/players/:playerId/make-available", handleMakePlayerAvailable);
+app.put("/api/matches/:matchId/players/:playerId/make-available", handleMakePlayerAvailable);
+app.put("/api/matches/:matchId/make-player-available", handleMakePlayerAvailable);
 
 /** Ångra match — tar bort genomförd status, återställer rotation utifrån kvarvarande matcher, uppdaterar statistik. */
 app.post("/api/matches/:id/reopen", async (req, res) => {
