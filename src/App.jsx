@@ -13,6 +13,7 @@ import {
   playerCountsAsPlayedInMatchForTeamScope,
   playerMatchParticipationKind,
   isPlayerSelectableForMatch,
+  isPlayerAvailable,
   match2015PlayersNeedingReplacement,
   matchUnavailablePlayerIdSet,
   isEligibleForMatchSquad,
@@ -1196,7 +1197,7 @@ function MatchLineupNames({
         <li key={p.id} className="lineup-list__row">
           <span className="lineup-list__name">
             {p.name}
-            {p.available === false ? (
+            {!isPlayerAvailable(p) ? (
               <span className="lineup-list__status" title="Frånvaro för hela säsongen (spelarlistan)">
                 {p.unavailableReason === "other" ? "Ej tillgänglig" : "Sjuk / frånvaro"}
               </span>
@@ -1205,7 +1206,7 @@ function MatchLineupNames({
                 Sjuk / frånvaro (matchen)
               </span>
             ) : null}
-            {declinedSet.has(p.id) && p.available !== false ? (
+            {declinedSet.has(p.id) && isPlayerAvailable(p) ? (
               <span className="lineup-list__status" title="Endast denna match">
                 Tackar nej
               </span>
@@ -1214,7 +1215,7 @@ function MatchLineupNames({
           <span className="lineup-list__year">{p.birthYear}</span>
           {canToggleAvailability ? (
             <span className="lineup-list__actions lineup-list__availability-btn">
-              {p.available === false || unavailableSet.has(p.id) || declinedSet.has(p.id) ? (
+              {!isPlayerAvailable(p) || unavailableSet.has(p.id) || declinedSet.has(p.id) ? (
                 <button
                   type="button"
                   className="btn btn--sm btn--secondary"
@@ -1958,7 +1959,7 @@ function MatchCard({
   const declinedRows = declinedPlayerIds
     .map((id) => state.players.find((p) => p.id === id))
     .filter(Boolean)
-    .filter((p) => (m.selectedPlayerIds || []).includes(p.id) && p.available !== false)
+    .filter((p) => (m.selectedPlayerIds || []).includes(p.id) && isPlayerAvailable(p))
     .sort((a, b) => {
       if (a.birthYear !== b.birthYear) return a.birthYear - b.birthYear;
       return a.name.localeCompare(b.name, "sv");
@@ -4409,7 +4410,7 @@ export default function App() {
                             </td>
                             <td data-label="Matcher">{p.matchesPlayed}</td>
                             <td data-label="Status">
-                              {p.available === false ? (
+                              {!isPlayerAvailable(p) ? (
                                 <span className="badge-avail badge-avail--no">Ej tillgänglig</span>
                               ) : (
                                 <span className="badge-avail badge-avail--ok">Tillgänglig</span>
@@ -4422,28 +4423,28 @@ export default function App() {
                                   className="btn btn--secondary btn--table"
                                   onClick={async () => {
                                     setErr("");
-                                    const cur = p.available !== false;
+                                    const isAvail = isPlayerAvailable(p);
                                     try {
-                                      if (cur) {
+                                      if (!isAvail) {
                                         setState((prev) =>
                                           applyMakeAvailableToState(prev, { playerId: p.id, allUpcoming: true }),
                                         );
                                       }
                                       const next = await api(`/api/players/${p.id}`, {
                                         method: "PUT",
-                                        body: !cur
+                                        body: isAvail
                                           ? { available: false, unavailableReason: "sick" }
                                           : { available: true },
                                       });
                                       setState(() => next);
-                                      setOkMsg(cur ? "Spelaren är tillgänglig." : "Frånvaro registrerad.");
+                                      setOkMsg(isAvail ? "Frånvaro registrerad." : "Spelaren är tillgänglig.");
                                     } catch (x) {
                                       setErr(x.message);
                                       await load({ silent: true });
                                     }
                                   }}
                                 >
-                                  {p.available === false ? "Tillgänglig" : "Frånvaro"}
+                                  {!isPlayerAvailable(p) ? "Tillgänglig" : "Frånvaro"}
                                 </button>
                                 <button
                                   type="button"
