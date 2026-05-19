@@ -287,6 +287,40 @@ export function repairClearUnavailableOnPlayedMatches(state) {
   return dirty;
 }
 
+/** Tar bort match-frånvaro och «tack nej» för en spelare på en match. */
+export function clearPlayerAbsenceForMatch(match, playerId) {
+  const pid = String(playerId ?? "").trim();
+  if (!pid || !match) return false;
+  let dirty = false;
+  const nextUnavail = (match.unavailablePlayerIds || [])
+    .map((id) => String(id ?? "").trim())
+    .filter(Boolean)
+    .filter((id) => id !== pid);
+  if (nextUnavail.length !== (match.unavailablePlayerIds || []).length) {
+    match.unavailablePlayerIds = nextUnavail;
+    dirty = true;
+  }
+  const nextDeclined = (match.declinedPlayerIds || [])
+    .map((id) => String(id ?? "").trim())
+    .filter(Boolean)
+    .filter((id) => id !== pid);
+  if (nextDeclined.length !== (match.declinedPlayerIds || []).length) {
+    match.declinedPlayerIds = nextDeclined;
+    dirty = true;
+  }
+  return dirty;
+}
+
+/** Nollställ match-frånvaro/tack-nej på alla kommande matcher för spelaren. */
+export function clearPlayerAbsenceOnUpcomingMatches(state, playerId) {
+  let dirty = false;
+  for (const m of state.matches || []) {
+    if (m.status === "played") continue;
+    if (clearPlayerAbsenceForMatch(m, playerId)) dirty = true;
+  }
+  return dirty;
+}
+
 /** PRNG med fast frö — reproducerbar säsongssimulering. */
 export function makeRng(seed = 0x9e3779b9) {
   let s = seed >>> 0;

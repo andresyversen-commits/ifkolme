@@ -36,6 +36,8 @@ import {
   pruneDeclinedNotInSquad,
   clearMatchUnavailableFlags,
   repairClearUnavailableOnPlayedMatches,
+  clearPlayerAbsenceForMatch,
+  clearPlayerAbsenceOnUpcomingMatches,
 } from "./selection.mjs";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -1438,8 +1440,10 @@ app.put("/api/players/:id", async (req, res) => {
   }
   if (available !== undefined && available !== null) {
     p.available = Boolean(available);
-    if (p.available) p.unavailableReason = null;
-    else if (unavailableReason === undefined) p.unavailableReason = "sick";
+    if (p.available) {
+      p.unavailableReason = null;
+      clearPlayerAbsenceOnUpcomingMatches(state, p.id);
+    } else if (unavailableReason === undefined) p.unavailableReason = "sick";
   }
   if (unavailableReason !== undefined && unavailableReason !== null) {
     if (p.available) {
@@ -1738,6 +1742,24 @@ app.put("/api/matches/:id/unavailable", async (req, res) => {
     set.delete(playerId);
   }
   match.unavailablePlayerIds = [...set];
+  await writeState(state);
+  res.json(jsonState(state));
+});
+
+/** Gör spelaren tillgänglig för matchen (och valfritt hela truppen). */
+app.post("/api/matches/:matchId/players/:playerId/make-available", async (req, res) => {
+  const state = await readState();
+  const match = state.matches.find((m) => m.id === req.params.matchId);
+  if (!match) return res.status(404).json({ error: "Match hittades inte" });
+  const playerId = String(req.params.playerId || "").trim();
+  const pl = state.players.find((p) => String(p.id) === playerId);
+  if (!pl) return res.status(404).json({ error: "Spelaren hittades inte" });
+  clearPlayerAbsenceForMatch(match, playerId);
+  const clearGlobal = req.body?.clearGlobal !== false;
+  if (clearGlobal && pl.available === false) {
+    pl.available = true;
+    pl.unavailableReason = null;
+  }
   await writeState(state);
   res.json(jsonState(state));
 });

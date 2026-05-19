@@ -1116,6 +1116,7 @@ function MatchLineupNames({
   declinedPlayerIds = [],
   unavailablePlayerIds = [],
   canToggleAvailability = false,
+  attendanceBusyId = "",
   onAttendanceAction,
 }) {
   const declinedSet = useMemo(() => new Set(declinedPlayerIds || []), [declinedPlayerIds]);
@@ -1158,21 +1159,14 @@ function MatchLineupNames({
           <span className="lineup-list__year">{p.birthYear}</span>
           {canToggleAvailability ? (
             <span className="lineup-list__actions lineup-list__availability-btn">
-              {p.available === false || unavailableSet.has(p.id) ? (
+              {p.available === false || unavailableSet.has(p.id) || declinedSet.has(p.id) ? (
                 <button
                   type="button"
                   className="btn btn--sm btn--secondary"
-                  onClick={() => onAttendanceAction?.(p, "clear_sick")}
+                  disabled={attendanceBusyId === p.id}
+                  onClick={() => onAttendanceAction?.(p, "make_available")}
                 >
-                  Kryssa tillgänglig
-                </button>
-              ) : declinedSet.has(p.id) ? (
-                <button
-                  type="button"
-                  className="btn btn--sm btn--secondary"
-                  onClick={() => onAttendanceAction?.(p, "clear_declined")}
-                >
-                  Ångra tack nej
+                  {attendanceBusyId === p.id ? "Sparar…" : "Kryssa tillgänglig"}
                 </button>
               ) : (
                 <>
@@ -1935,6 +1929,7 @@ function MatchCard({
   }, [selectedRowsAll, players2015, m, declinedSet]);
   const [replacement2015Ids, setReplacement2015Ids] = useState([]);
   const [replacementBusy, setReplacementBusy] = useState(false);
+  const [attendanceBusyId, setAttendanceBusyId] = useState("");
   useEffect(() => {
     setReplacement2015Ids([]);
   }, [m.id, replaceable2015Key]);
@@ -2106,43 +2101,30 @@ function MatchCard({
 
   const handleAttendanceAction = async (player, kind) => {
     setErr("");
+    setAttendanceBusyId(player.id);
     try {
+      let next;
       if (kind === "sick") {
-        await api(`/api/matches/${m.id}/unavailable`, {
+        next = await api(`/api/matches/${m.id}/unavailable`, {
           method: "PUT",
           body: { playerId: player.id, unavailable: true },
         });
       } else if (kind === "declined") {
-        await api(`/api/matches/${m.id}/decline`, {
+        next = await api(`/api/matches/${m.id}/decline`, {
           method: "PUT",
           body: { playerId: player.id, declined: true },
         });
-      } else if (kind === "clear_sick") {
-        await api(`/api/matches/${m.id}/unavailable`, {
-          method: "PUT",
-          body: { playerId: player.id, unavailable: false },
-        });
-        if (player.available === false) {
-          await api(`/api/players/${player.id}`, {
-            method: "PUT",
-            body: { available: true },
-          });
-        }
-        if (declinedSet.has(player.id)) {
-          await api(`/api/matches/${m.id}/decline`, {
-            method: "PUT",
-            body: { playerId: player.id, declined: false },
-          });
-        }
-      } else if (kind === "clear_declined") {
-        await api(`/api/matches/${m.id}/decline`, {
-          method: "PUT",
-          body: { playerId: player.id, declined: false },
+      } else {
+        next = await api(`/api/matches/${m.id}/players/${player.id}/make-available`, {
+          method: "POST",
+          body: { clearGlobal: true },
         });
       }
-      await load({ silent: true });
+      await load({ silent: true, prefetched: next });
     } catch (x) {
-      setErr(x.message);
+      setErr(x.message || "Kunde inte uppdatera tillgänglighet.");
+    } finally {
+      setAttendanceBusyId("");
     }
   };
 
@@ -2317,9 +2299,8 @@ function MatchCard({
               declinedPlayerIds={declinedPlayerIds}
               unavailablePlayerIds={m.unavailablePlayerIds}
               canToggleAvailability={m.status !== "played"}
-              onAttendanceAction={(p, kind) => {
-                handleAttendanceAction(p, kind).catch(() => null);
-              }}
+              attendanceBusyId={attendanceBusyId}
+              onAttendanceAction={(p, kind) => handleAttendanceAction(p, kind)}
             />
             {sickInSquadRows.length > 0 ? (
               <div className="squad-sick-notice" style={{ marginTop: 8 }}>
@@ -2334,11 +2315,12 @@ function MatchCard({
                         key={p.id}
                         type="button"
                         className="btn btn--sm btn--secondary"
-                        onClick={() => {
-                          handleAttendanceAction(p, "clear_sick").catch(() => null);
-                        }}
+                        disabled={attendanceBusyId === p.id}
+                        onClick={() => handleAttendanceAction(p, "make_available")}
                       >
-                        Gör {p.name.split(" ")[0]} tillgänglig
+                        {attendanceBusyId === p.id
+                          ? "Sparar…"
+                          : `Gör ${p.name.split(" ")[0]} tillgänglig`}
                       </button>
                     ))}
                   </div>
@@ -3197,6 +3179,10 @@ export default function App() {
 
   const load = useCallback(async (opts = {}) => {
     if (!opts.silent) setErr("");
+    if (opts.prefetched) {
+      setState(() => opts.prefetched);
+      return opts.prefetched;
+    }
     // Unikt query mot /api/state så service worker / HTTP-diskcache inte levererar gammal payload.
     const s = await api(`/api/state?_=${Date.now()}`);
     setState(() => s);
@@ -4382,12 +4368,14 @@ export default function App() {
                                   onClick={async () => {
                                     setErr("");
                                     const cur = p.available !== false;
-                                      try {
-                                        await api(`/api/players/${p.id}`, {
-                                          method: "PUT",
-                                          body: !cur ? { available: false, unavailableReason: "sick" } : { available: true },
-                                        });
-                                        await load();
+                                    try {
+                                      const next = await api(`/api/players/${p.id}`, {
+                                        method: "PUT",
+                                        body: !cur
+                                          ? { available: false, unavailableReason: "sick" }
+                                          : { available: true },
+                                      });
+                                      await load({ prefetched: next });
                                     } catch (x) {
                                       setErr(x.message);
                                     }
