@@ -551,8 +551,10 @@ const SEED_FIXTURE_KEYS = ["series", "association", "date", "time", "venue", "ho
 function mergeSeedFixtureIntoMatch(existing, seedFixture) {
   if (!seedFixture || typeof seedFixture !== "object") return false;
   if (!existing.fixture || typeof existing.fixture !== "object") existing.fixture = {};
+  const scheduleLocked = existing.fixtureScheduleLocked === true;
   let changed = false;
   for (const key of SEED_FIXTURE_KEYS) {
+    if (scheduleLocked && (key === "date" || key === "time")) continue;
     const seedVal = seedFixture[key];
     if (seedVal == null || seedVal === "") continue;
     if (existing.fixture[key] !== seedVal) {
@@ -1407,6 +1409,10 @@ app.put("/api/matches/:id/fixture", async (req, res) => {
         return res.status(400).json({ error: "Ogiltigt datum (ÅÅÅÅ-MM-DD)." });
       }
       match.fixture.date = d;
+      match.fixtureScheduleLocked = true;
+    } else if (key === "time") {
+      match.fixture.time = String(body.time ?? "").trim();
+      match.fixtureScheduleLocked = true;
     } else {
       match.fixture[key] = String(body[key] ?? "").trim();
     }

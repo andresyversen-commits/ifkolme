@@ -2333,6 +2333,28 @@ function MatchCard({
         </div>
       ) : null}
 
+      {matchSubTab === "squad" && m.status !== "played" && isP11Branch ? (
+        <p className="text-muted" style={{ margin: "0 0 12px", fontSize: 14, lineHeight: 1.45 }}>
+          P 11: tryck <strong>Välj lag</strong> längst ned. Alla tillgängliga födda 2015 tas med, plus{" "}
+          {assist2016Target > 0 ? (
+            <>
+              <strong>{assist2016Target}</strong> födda 2016 (assist)
+            </>
+          ) : (
+            "inga assist 2016"
+          )}
+          . Födda 2014 läggs till automatiskt. Kryssrutor nedan gäller bara valfritt manuellt urval av 2016 — inte hela
+          truppen.
+        </p>
+      ) : null}
+
+      {matchSubTab === "squad" && m.status !== "played" && isP11Branch && n15 === 0 && n16 === 0 && m.selectedPlayerIds.length > 0 ? (
+        <div className="callout callout--muted" role="status" style={{ marginBottom: 12 }}>
+          <strong>Truppen är inte komplett.</strong> Endast reserv (2014) visas — tryck <strong>Välj lag</strong> för att
+          fylla med 2015 och 2016.
+        </div>
+      ) : null}
+
       {matchSubTab === "squad" && <div className="match-card__body">
         {m.selectedPlayerIds.length > 0 ? (
           <>
@@ -2978,6 +3000,13 @@ function MatchCard({
         </div>
       )}
 
+      {matchSubTab === "squad" && m.status !== "played" && squadMode === "p11Mixed" && showManual2016 && !p11Manual2016Ok ? (
+        <p className="text-muted" style={{ margin: "0 0 10px", fontSize: 14 }}>
+          Välj exakt <strong>{assist2016Target}</strong> spelare födda 2016 under manuellt urval, eller avmarkera
+          kryssrutan ovan.
+        </p>
+      ) : null}
+
       {matchSubTab === "squad" && <div className="match-card__actions">
         <button
           type="button"
@@ -2997,11 +3026,12 @@ function MatchCard({
               if (squadMode === "p11Mixed" && showManual2016 && manual2016Ids.length) {
                 body.override2016PlayerIds = manual2016Ids;
               }
-              await api(`/api/matches/${m.id}/select`, {
+              const next = await api(`/api/matches/${m.id}/select`, {
                 method: "POST",
                 body: Object.keys(body).length ? body : undefined,
               });
-              await load();
+              await load({ prefetched: next });
+              setOkMsg("Lag valt.");
             } catch (x) {
               setErr(x.message);
             }
