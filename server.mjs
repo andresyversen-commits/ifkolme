@@ -33,7 +33,6 @@ import {
   validateMatchSquadForComplete,
   buildSquadWith2015Replacements,
   match2015PlayersNeedingReplacement,
-  pruneDeclinedNotInSquad,
   clearMatchUnavailableFlags,
   repairClearUnavailableOnPlayedMatches,
   clearPlayerAbsenceOnUpcomingMatches,
@@ -1506,13 +1505,8 @@ async function applyMatchSquadUpdate(state, match, uniq) {
   if (!squadValidation.ok) return { error: squadValidation.error };
 
   match.selectedPlayerIds = selectedPlayerIds;
-  const selSet = new Set(selectedPlayerIds.map(String));
-  if (Array.isArray(match.declinedPlayerIds)) {
-    match.declinedPlayerIds = match.declinedPlayerIds.filter((id) => selSet.has(String(id)));
-  }
   pruneMatchUnavailableToSquad(match);
   pruneMatchLineupToSelectedSquad(match);
-  pruneDeclinedNotInSquad(match);
   if (match.status === "played") reconcilePlayerStats(state);
   return { ok: true };
 }
@@ -1709,6 +1703,8 @@ app.put("/api/matches/:id/decline", async (req, res) => {
   if (!playerId) return res.status(400).json({ error: "Spelar-ID saknas" });
   const declined = Boolean(req.body?.declined);
   if (!Array.isArray(match.declinedPlayerIds)) match.declinedPlayerIds = [];
+  const normalized = match.declinedPlayerIds.map((id) => String(id ?? "").trim()).filter(Boolean);
+  match.declinedPlayerIds = [...new Set(normalized)];
   const exists = match.declinedPlayerIds.includes(playerId);
   if (declined && !exists) match.declinedPlayerIds.push(playerId);
   if (!declined && exists) {

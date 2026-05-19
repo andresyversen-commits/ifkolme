@@ -296,11 +296,9 @@ export function buildSquadWith2015Replacements(match, state, replacementIds) {
   ];
 }
 
-export function pruneDeclinedNotInSquad(match) {
-  const sel = new Set((match.selectedPlayerIds || []).map((id) => String(id ?? "").trim()).filter(Boolean));
-  match.declinedPlayerIds = (match.declinedPlayerIds || [])
-    .map((id) => String(id ?? "").trim())
-    .filter((id) => sel.has(id));
+/** Behåll «tack nej» även om spelaren inte längre finns i truppen (statistik/historik). */
+export function pruneDeclinedNotInSquad(_match) {
+  return false;
 }
 
 export function pruneMatchUnavailableToSquad(match) {

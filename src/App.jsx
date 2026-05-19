@@ -1957,9 +1957,8 @@ function MatchCard({
   const selectedRows = selectedRowsAll.filter((p) => isPlayerSelectableForMatch(p, m));
   const sickInSquadRows = selectedRowsAll.filter((p) => !isPlayerSelectableForMatch(p, m));
   const declinedRows = declinedPlayerIds
-    .map((id) => state.players.find((p) => p.id === id))
+    .map((id) => state.players.find((p) => String(p.id) === String(id)))
     .filter(Boolean)
-    .filter((p) => (m.selectedPlayerIds || []).includes(p.id) && isPlayerAvailable(p))
     .sort((a, b) => {
       if (a.birthYear !== b.birthYear) return a.birthYear - b.birthYear;
       return a.name.localeCompare(b.name, "sv");
@@ -3550,7 +3549,9 @@ export default function App() {
     const declines = new Map();
     for (const m of scopedMatches) {
       for (const id of m.declinedPlayerIds || []) {
-        declines.set(id, (declines.get(id) || 0) + 1);
+        const pid = String(id ?? "").trim();
+        if (!pid) continue;
+        declines.set(pid, (declines.get(pid) || 0) + 1);
       }
     }
     return {
@@ -3589,7 +3590,12 @@ export default function App() {
   const overviewPlayerHistoryRows = useMemo(() => {
     if (!state?.matches || !overviewHistoryPlayerId) return [];
     const pid = overviewHistoryPlayerId;
-    return [...state.matches].sort(compareMatchesChronologically).map((m) => ({
+    const scoped = state.matches.filter((m) => {
+      const br = m.branch === "p11" ? "p11" : "p10";
+      if (overviewTeam === "both") return true;
+      return overviewTeam === br;
+    });
+    return [...scoped].sort(compareMatchesChronologically).map((m) => ({
       match: m,
       kind: playerMatchParticipationKind(m, pid, state),
       dateLabel: formatFixtureDateSv(m.fixture?.date),
@@ -3597,7 +3603,7 @@ export default function App() {
       branchLabel: matchBranchKey(m) === "p11" ? "P 11" : "P 10",
       matchNo: m.number != null ? String(m.number) : "—",
     }));
-  }, [state, overviewHistoryPlayerId]);
+  }, [state, overviewHistoryPlayerId, overviewTeam]);
 
   useEffect(() => {
     if (!overviewHistoryPlayerId) return;
