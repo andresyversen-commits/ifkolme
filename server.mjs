@@ -1003,34 +1003,53 @@ async function readState() {
     }
     bootstrappedFromFallback = bootstrappedFromFallback || Boolean(settingsPool);
   }
-  let dirty = migrateStateShape(data);
+  const snapshotBefore = stateMigrationFingerprint(data);
+  migrateStateShape(data);
   const dbLogos = await loadTeamLogosMap();
   if (Object.keys(dbLogos).length > 0) {
     if (!data.teamLogos || typeof data.teamLogos !== "object") data.teamLogos = {};
-    let mergedAny = false;
     for (const [k, v] of Object.entries(dbLogos)) {
-      if (!data.teamLogos[k]) {
-        data.teamLogos[k] = v;
-        mergedAny = true;
-      }
+      if (!data.teamLogos[k]) data.teamLogos[k] = v;
     }
-    if (mergedAny) dirty = true;
   }
-  if (ensureMeta(data)) dirty = true;
-  if (migrateAvailability(data)) dirty = true;
-  if (repairGroups2015IfNeeded(data)) dirty = true;
-  if (repairGroups2016IfNeeded(data)) dirty = true;
-  if (stripLegacyP10SquadsIfNeeded(data)) dirty = true;
-  if (repairP11Squad2014IfNeeded(data)) dirty = true;
-  if (ensureMinimumScheduleFromSeed(data)) dirty = true;
-  // Nya matcher från seed saknar fält tills migrateStateShape körts igen.
-  if (migrateStateShape(data)) dirty = true;
-  if (applyRemoteSettingsIfNeeded(data)) dirty = true;
-  if (reconcilePlayerStats(data)) dirty = true;
-  if (backfillIntendedGroups2015(data)) dirty = true;
-  if (repairClearUnavailableOnPlayedMatches(data)) dirty = true;
-  if (dirty || bootstrappedFromFallback) await writeState(data);
+  ensureMeta(data);
+  migrateAvailability(data);
+  repairGroups2015IfNeeded(data);
+  repairGroups2016IfNeeded(data);
+  stripLegacyP10SquadsIfNeeded(data);
+  repairP11Squad2014IfNeeded(data);
+  ensureMinimumScheduleFromSeed(data);
+  migrateStateShape(data);
+  applyRemoteSettingsIfNeeded(data);
+  reconcilePlayerStats(data);
+  backfillIntendedGroups2015(data);
+  repairClearUnavailableOnPlayedMatches(data);
+  const snapshotAfter = stateMigrationFingerprint(data);
+  const actuallyChanged = snapshotBefore !== snapshotAfter;
+  if (actuallyChanged || bootstrappedFromFallback) await writeState(data);
   return data;
+}
+
+/**
+ * Fingeravtrykk av migrerbart innhold — utelater `meta` (revision/updatedAt)
+ * og felter som regenereres av `jsonState`/`syncMatchShape`. Brukes til å
+ * unngå at hver GET trigger en skriving og bumper revision unødig.
+ */
+function stateMigrationFingerprint(state) {
+  if (!state || typeof state !== "object") return "";
+  const clone = JSON.parse(JSON.stringify(state));
+  delete clone.meta;
+  delete clone.rotationView;
+  delete clone.coachNames;
+  delete clone.fixturesP11;
+  if (Array.isArray(clone.matches)) {
+    for (const m of clone.matches) {
+      delete m.matchNumber;
+      delete m.selectedPlayers;
+      delete m.group2015;
+    }
+  }
+  return JSON.stringify(clone);
 }
 
 function normalizeImportedState(raw) {

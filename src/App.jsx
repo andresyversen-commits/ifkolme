@@ -3244,12 +3244,16 @@ function MatchCard({
                     setErr("");
                     setReportBusy(true);
                     try {
-                      await api(`/api/matches/${m.id}/complete`, {
+                      const nextState = await api(`/api/matches/${m.id}/complete`, {
                         method: "POST",
                         body: buildMatchReportPayload(),
                       });
+                      const completed = nextState?.matches?.find((x) => x.id === m.id);
+                      if (!completed || completed.status !== "played") {
+                        throw new Error("Matchen blev inte registrerad som genomförd — försök igen.");
+                      }
+                      await load({ silent: true, prefetched: nextState });
                       setMatchDialog(null);
-                      const nextState = await load({ silent: true });
                       onMatchCompleted?.(m.id, nextState);
                     } catch (x) {
                       setErr(x.message);
@@ -3269,12 +3273,12 @@ function MatchCard({
                     setErr("");
                     setReportBusy(true);
                     try {
-                      await api(`/api/matches/${m.id}/report`, {
+                      const nextState = await api(`/api/matches/${m.id}/report`, {
                         method: "PUT",
                         body: buildMatchReportPayload(),
                       });
+                      await load({ silent: true, prefetched: nextState });
                       setMatchDialog(null);
-                      await load();
                     } catch (x) {
                       setErr(x.message);
                     } finally {
