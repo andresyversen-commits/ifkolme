@@ -671,11 +671,26 @@ function TestLabPanel({ setErr, setOkMsg }) {
           <form className="form-add" onSubmit={addPlayer} style={{ marginTop: 16 }}>
             <div className="field">
               <span className="field__label">Spelarnamn</span>
-              <input className="field__input" value={playerNameDraft} onChange={(e) => setPlayerNameDraft(e.target.value)} placeholder="Namn" />
+              <input
+                className="field__input"
+                value={playerNameDraft}
+                onChange={(e) => setPlayerNameDraft(e.target.value)}
+                placeholder="Namn"
+                autoComplete="name"
+                autoCapitalize="words"
+              />
             </div>
             <div className="field">
               <span className="field__label">Nummer (valfritt)</span>
-              <input className="field__input" type="number" min={1} value={playerNumberDraft} onChange={(e) => setPlayerNumberDraft(e.target.value)} />
+              <input
+                className="field__input"
+                type="number"
+                inputMode="numeric"
+                pattern="[0-9]*"
+                min={1}
+                value={playerNumberDraft}
+                onChange={(e) => setPlayerNumberDraft(e.target.value)}
+              />
             </div>
             <button type="submit" className="btn btn--secondary">Lägg till spelare</button>
           </form>
@@ -704,6 +719,8 @@ function TestLabPanel({ setErr, setOkMsg }) {
                               className="field__input"
                               style={{ width: 120, padding: "8px 10px" }}
                               type="number"
+                              inputMode="numeric"
+                              pattern="[0-9]*"
                               min={1}
                               placeholder="Nr"
                               value={playerEditNumberDraft}
@@ -1447,6 +1464,8 @@ function MatchFixtureEditor({ matchId, fixture, isP11Series, onSaved, setErr }) 
             <span className="field__label">Antal födda 2016 (assist)</span>
             <input
               type="number"
+              inputMode="numeric"
+              pattern="[0-9]*"
               min={0}
               max={20}
               className="field__input"
@@ -2655,6 +2674,8 @@ function MatchCard({
                 <input
                   className="field__select"
                   type="number"
+                  inputMode="numeric"
+                  pattern="[0-9]*"
                   min={1}
                   max={5}
                   value={formationDraft.defenders}
@@ -2663,6 +2684,8 @@ function MatchCard({
                 <input
                   className="field__select"
                   type="number"
+                  inputMode="numeric"
+                  pattern="[0-9]*"
                   min={0}
                   max={5}
                   value={formationDraft.midfielders}
@@ -2671,6 +2694,8 @@ function MatchCard({
                 <input
                   className="field__select"
                   type="number"
+                  inputMode="numeric"
+                  pattern="[0-9]*"
                   min={0}
                   max={5}
                   value={formationDraft.attackers}
@@ -4389,6 +4414,8 @@ export default function App() {
                   <input
                     className="field__input"
                     type="number"
+                    inputMode="numeric"
+                    pattern="[0-9]*"
                     min={1}
                     value={form.jerseyNumber}
                     onChange={(e) => setForm((f) => ({ ...f, jerseyNumber: e.target.value }))}
@@ -4461,6 +4488,8 @@ export default function App() {
                                     <input
                                       className="field__input"
                                       type="number"
+                                      inputMode="numeric"
+                                      pattern="[0-9]*"
                                       min={1}
                                       value={editJerseyNumber}
                                       onChange={(e) => setEditJerseyNumber(e.target.value)}
@@ -4671,6 +4700,9 @@ export default function App() {
                       <span className="field__label">Telefon</span>
                       <input
                         className="field__input"
+                        type="tel"
+                        inputMode="tel"
+                        autoComplete="tel"
                         value={c.phone}
                         onChange={(e) =>
                           setCoachesDraft((prev) => {

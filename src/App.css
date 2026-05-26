@@ -13,6 +13,9 @@
 html {
   -webkit-text-size-adjust: 100%;
   overflow-x: hidden;
+  /* Stabil vy under sticky header/keyboard på mobil */
+  scroll-padding-top: 12px;
+  scroll-padding-bottom: 96px;
 }
 
 body {
@@ -27,6 +30,24 @@ body {
   overflow-x: hidden;
   --page-gutter-safe-left: max(var(--page-gutter), env(safe-area-inset-left));
   --page-gutter-safe-right: max(var(--page-gutter), env(safe-area-inset-right));
+  /* Forhindre at hele siden scroller når en modal/scroller scrolles til kanten */
+  overscroll-behavior-y: none;
+}
+
+/* iOS zoomer inn på inputs med font-size < 16px ved fokus.
+   Sett 16px på små skjermer for alle skrivbare felt for trygghets skyld. */
+@media (max-width: 767px) {
+  input,
+  select,
+  textarea {
+    font-size: max(16px, 1rem);
+  }
+}
+
+/* Bedre tap-respons og fjerning av blå highlight på alle knapper/lenker */
+button,
+a {
+  -webkit-tap-highlight-color: transparent;
 }
 
 #root {
@@ -257,8 +278,26 @@ body {
   }
 
   .app-bottom-nav .segmented__btn {
-    min-height: 44px;
+    min-height: 48px;
     font-size: 13px;
+    padding: 6px 4px;
+    line-height: 1.15;
+  }
+
+  /* Aksent-strek over aktiv flik så den er mer tydelig på mobil */
+  .app-bottom-nav .segmented__btn[aria-selected="true"]::before {
+    content: "";
+    position: absolute;
+    left: 18%;
+    right: 18%;
+    top: 2px;
+    height: 3px;
+    border-radius: 999px;
+    background: var(--tint);
+  }
+
+  .app-bottom-nav .segmented__btn {
+    position: relative;
   }
 }
 
@@ -879,6 +918,30 @@ body {
   }
 }
 
+/* Veldig smale skjermer: gjør plass til navn ved å komprimere kolonneoverskrifter */
+@media (max-width: 360px) {
+  .stat-list.stat-list--overview > .stat-head,
+  .stat-list.stat-list--overview > .stat-row--clickable {
+    grid-template-columns:
+      minmax(0, 1fr)
+      1.85rem
+      2.35rem
+      2.6rem;
+    column-gap: 6px;
+    padding-left: 10px;
+    padding-right: 10px;
+  }
+
+  .stat-list--overview .stat-row__name {
+    font-size: 15px;
+  }
+
+  .stat-list--overview .stat-row__value,
+  .stat-list--overview .stat-row__declined {
+    font-size: 15px;
+  }
+}
+
 .player-history-modal__lead {
   margin: 0 0 10px;
   font-size: 14px;
@@ -1183,6 +1246,15 @@ body {
   padding: 5px 10px;
   font-size: 13px;
   font-weight: 600;
+}
+
+/* På mobil bør actionknappene være lettere å treffe (Apple HIG: 44px) */
+@media (max-width: 767px) {
+  .players-table .btn--table {
+    min-height: 40px;
+    padding: 8px 12px;
+    font-size: 14px;
+  }
 }
 
 .players-table .actions-cell {
@@ -1531,6 +1603,14 @@ body {
   padding: 4px 10px;
 }
 
+@media (max-width: 519px) {
+  .match-card__report-btn {
+    min-height: 40px;
+    padding: 7px 12px;
+    font-size: 13px;
+  }
+}
+
 .modal-overlay {
   position: fixed;
   inset: 0;
@@ -1540,6 +1620,9 @@ body {
   align-items: flex-end;
   justify-content: center;
   padding: 12px 12px max(16px, env(safe-area-inset-bottom)) 12px;
+  /* Hindrer at scroll lekker til siden bak modalen på mobil */
+  overscroll-behavior: contain;
+  -webkit-overflow-scrolling: touch;
 }
 
 .modal-overlay--player-history {
@@ -1559,13 +1642,15 @@ body {
 
 .modal-sheet {
   width: min(100%, 440px);
-  max-height: min(88vh, 640px);
+  max-height: min(88dvh, 640px);
   overflow: auto;
   background: var(--bg-elevated);
   border-radius: 16px 16px 0 0;
   box-shadow: var(--shadow-card);
   border: 1px solid var(--border);
   padding: 16px 18px 18px;
+  overscroll-behavior: contain;
+  -webkit-overflow-scrolling: touch;
 }
 
 @media (min-width: 520px) {
@@ -1574,10 +1659,25 @@ body {
   }
 }
 
+@media (max-width: 519px) {
+  .modal-sheet {
+    /* Full bredde nederst på små skjermer; behold rundede topphjørner */
+    width: 100%;
+    max-height: 92dvh;
+    padding: 14px 14px max(16px, env(safe-area-inset-bottom));
+  }
+}
+
 .modal-sheet__title {
   margin: 0 0 12px;
   font-size: 18px;
   font-weight: 700;
+  /* Hold tittelen synlig når feltene scroller */
+  position: sticky;
+  top: 0;
+  background: var(--bg-elevated);
+  padding: 2px 0 8px;
+  z-index: 2;
 }
 
 .modal-sheet__field {
@@ -1590,6 +1690,29 @@ body {
   gap: 10px;
   justify-content: flex-end;
   margin-top: 4px;
+  /* Hold knappene synlige selv om feltene scroller */
+  position: sticky;
+  bottom: 0;
+  background: linear-gradient(180deg, transparent, var(--bg-elevated) 30%);
+  padding-top: 10px;
+  padding-bottom: 2px;
+  z-index: 2;
+}
+
+@media (max-width: 519px) {
+  /* På små skjermer: full bredde på "Avbryt" + "Lagre" så det blir lett å treffe */
+  .modal-sheet__actions {
+    gap: 8px;
+  }
+
+  .modal-sheet__actions .btn {
+    flex: 1 1 calc(50% - 4px);
+    min-width: 0;
+  }
+
+  .modal-sheet__actions .btn:only-child {
+    flex: 1 1 100%;
+  }
 }
 
 .modal-sheet__rating-preview {
@@ -1776,6 +1899,18 @@ body {
   color: var(--muted-foreground);
 }
 
+@media (max-width: 519px) {
+  .match-toolbar {
+    padding: 8px 12px;
+    gap: 6px 10px;
+    font-size: 12px;
+  }
+
+  .match-toolbar__sep {
+    display: none;
+  }
+}
+
 .match-toolbar__label {
   font-weight: 600;
   color: var(--foreground);
@@ -1885,7 +2020,8 @@ body {
   min-width: 0;
   display: inline-flex;
   align-items: center;
-  gap: 8px;
+  flex-wrap: wrap;
+  gap: 6px 8px;
 }
 
 .lineup-list__year {
@@ -1910,6 +2046,7 @@ body {
 
 .lineup-list__availability-btn {
   justify-self: end;
+  min-height: 36px;
 }
 
 .lineup-list__actions {
@@ -1919,6 +2056,25 @@ body {
   align-items: center;
   justify-content: flex-end;
   justify-self: end;
+}
+
+@media (max-width: 519px) {
+  .lineup-list__row {
+    padding: 12px 12px;
+    gap: 8px 10px;
+  }
+
+  .lineup-list__availability-btn,
+  .lineup-list__actions {
+    min-height: 40px;
+  }
+
+  .lineup-list__actions .btn--table,
+  .lineup-list__availability-btn.btn--table {
+    min-height: 40px;
+    padding: 8px 12px;
+    font-size: 14px;
+  }
 }
 
 .lineup-pitch {
@@ -2675,18 +2831,37 @@ body {
 
 .match-availability__grid {
   display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(210px, 1fr));
+  grid-template-columns: repeat(auto-fill, minmax(190px, 1fr));
   gap: 8px;
+}
+
+@media (max-width: 519px) {
+  .match-availability__grid {
+    grid-template-columns: 1fr 1fr;
+    gap: 6px;
+  }
+}
+
+@media (max-width: 360px) {
+  .match-availability__grid {
+    grid-template-columns: 1fr;
+  }
 }
 
 .match-availability__chip {
   border: 1px solid var(--border);
   background: var(--background);
   border-radius: 999px;
-  padding: 8px 12px;
-  font-size: 13px;
+  padding: 10px 12px;
+  min-height: 40px;
+  font-size: 14px;
   text-align: left;
   color: var(--foreground);
+  display: inline-flex;
+  align-items: center;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .match-availability__chip--off {
@@ -2709,6 +2884,19 @@ body {
   font-size: 12px;
   font-weight: 600;
   z-index: 1;
+}
+
+@media (max-width: 519px) {
+  .fixture-block__edit-btn {
+    min-height: 36px;
+    padding: 6px 12px;
+    font-size: 13px;
+  }
+
+  .fixture-block {
+    /* Sørg for at "Ändra" ikke overlapper med serietittel/laglogoer */
+    padding-top: 48px;
+  }
 }
 
 .fixture-block {
@@ -3109,6 +3297,12 @@ body {
 
   .fixture-block__time {
     font-size: 20px;
+  }
+
+  .fixture-crest {
+    width: 38px;
+    height: 38px;
+    font-size: 15px;
   }
 
   .lineup-pitch__surface {
