@@ -2242,10 +2242,13 @@ function MatchCard({
           <MinFotbollFixture fixture={m.fixture} getStoredTeamLogo={getStoredTeamLogo} />
           <button
             type="button"
-            className="btn btn--plain fixture-block__edit-btn"
+            className="btn fixture-block__edit-btn"
             onClick={() => setMatchSubTab("fixture")}
+            aria-label="Redigera matchinfo"
+            title="Redigera matchinfo"
           >
-            Redigera matchinfo
+            <span aria-hidden="true">✎</span>
+            <span className="fixture-block__edit-btn-label">Ändra</span>
           </button>
         </div>
       ) : null}
@@ -3349,7 +3352,7 @@ export default function App() {
   const [activeMatchId, setActiveMatchId] = useState(null);
   /** Matcher-flik: lista kommande, spelade eller alla (med datum i kalender). */
   const [matchListScope, setMatchListScope] = useState("upcoming");
-  const [showMatchCalendar, setShowMatchCalendar] = useState(false);
+  const [showMatchCalendar, setShowMatchCalendar] = useState(true);
   const [playersSort, setPlayersSort] = useState({ key: "birthYear", dir: "asc" });
   const [importing, setImporting] = useState(false);
   const [deferredInstallPrompt, setDeferredInstallPrompt] = useState(null);
