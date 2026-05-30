@@ -1183,6 +1183,63 @@ async function requestMakePlayerAvailable(matchId, player, matchSnapshot) {
 }
 
 /** Truppvisning: samma namn-/år-typografi som översikten, sorterat 2015 först. */
+function QueuePanel({ title, subtitle, queue, slots }) {
+  if (!Array.isArray(queue) || queue.length === 0) return null;
+  const slotsN = Number.isFinite(slots) ? Math.max(0, slots) : 0;
+  const selectable = queue.filter((q) => q.selectable);
+  const onCallIds = new Set(selectable.slice(0, slotsN).map((q) => q.id));
+  const reserveSelectable = selectable.slice(slotsN);
+  const notSelectable = queue.filter((q) => !q.selectable);
+  const ordered = [
+    ...selectable.slice(0, slotsN),
+    ...reserveSelectable,
+    ...notSelectable,
+  ];
+  return (
+    <div className="queue-panel" role="group" aria-label={title}>
+      <div className="queue-panel__head">
+        <strong className="queue-panel__title">{title}</strong>
+        {subtitle ? <span className="queue-panel__subtitle">{subtitle}</span> : null}
+      </div>
+      <ol className="queue-panel__list">
+        {ordered.map((q, idx) => {
+          const onCall = onCallIds.has(q.id);
+          let badge;
+          if (q.globallyUnavailable) badge = "Sjuk";
+          else if (q.declined) badge = "Tackat nej";
+          else if (q.unavailableForMatch) badge = "Frånvarande";
+          const rowClass = [
+            "queue-panel__row",
+            onCall ? "queue-panel__row--oncall" : "queue-panel__row--reserve",
+            !q.selectable ? "queue-panel__row--unavail" : "",
+          ]
+            .filter(Boolean)
+            .join(" ");
+          return (
+            <li key={q.id} className={rowClass}>
+              <span className="queue-panel__pos" aria-hidden="true">{idx + 1}.</span>
+              <span className="queue-panel__name">{q.name}</span>
+              <span className="queue-panel__count" title="Antal matcher (inkl. planerade)">
+                {q.projectedCount} sp.
+              </span>
+              <span className="queue-panel__pills">
+                {onCall ? (
+                  <span className="queue-panel__pill queue-panel__pill--on" title="I tur för denna match">I tur</span>
+                ) : q.selectable ? (
+                  <span className="queue-panel__pill queue-panel__pill--reserve" title="Reserv (om någon faller bort)">Reserv</span>
+                ) : null}
+                {badge ? (
+                  <span className="queue-panel__pill queue-panel__pill--unavail" title={badge}>{badge}</span>
+                ) : null}
+              </span>
+            </li>
+          );
+        })}
+      </ol>
+    </div>
+  );
+}
+
 function MatchLineupNames({
   playerIds,
   players,
@@ -1796,6 +1853,7 @@ function MatchCard({
   const n15 = m.selectedPlayerIds.filter((id) => players2015.some((p) => p.id === id)).length;
   const n16 = m.selectedPlayerIds.filter((id) => players2016.some((p) => p.id === id)).length;
   const n14 = m.selectedPlayerIds.filter((id) => birthYearNum(state.players.find((p) => p.id === id)) === 2014).length;
+  const matchQueue = rotationView?.queueByMatch?.[m.id] || null;
   const [showManual, setShowManual] = useState(false);
   const [manualIds, setManualIds] = useState([]);
   const [showManual2016, setShowManual2016] = useState(false);
@@ -2335,19 +2393,34 @@ function MatchCard({
         </div>
       </div>
 
-      {(m.branch || "p10") !== "p11" && rotationView ? (
-        <p className="match-card__next-group">
-          Nästa grupp i tur: <strong>{rotationView.nextGroupLabel ?? "Grupp A"}</strong>
-        </p>
+      {m.status !== "played" && matchQueue?.queue2015 ? (
+        <QueuePanel
+          title="2015 — i tur för denna match"
+          subtitle="Färst matcher = först i kö. Rött = ej tillgänglig."
+          queue={matchQueue.queue2015}
+          slots={
+            matchQueue.mode === "all2015"
+              ? matchQueue.queue2015.filter((q) => q.selectable).length
+              : 3
+          }
+        />
+      ) : null}
+      {m.status !== "played" && matchQueue?.queue2016 && matchQueue.mode === "p11Mixed" && matchQueue.slots2016 > 0 ? (
+        <QueuePanel
+          title={`2016 (assist) — i tur för denna match`}
+          subtitle={`Färst matcher som assist först. ${matchQueue.slots2016} spelare tas ut.`}
+          queue={matchQueue.queue2016}
+          slots={matchQueue.slots2016}
+        />
       ) : null}
 
-      {m.intendedGroup2015 && (
-        <p style={{ margin: "0 0 8px", fontSize: 15, fontWeight: 600 }}>
+      {m.status === "played" && m.intendedGroup2015 && (
+        <p style={{ margin: "0 0 8px", fontSize: 14, color: "var(--text-secondary)" }}>
           Grupp 2015 (rotation): {groupLabelDisp(m.intendedGroup2015)}
         </p>
       )}
-      {squadMode === "p11Mixed" && m.intendedGroup2016 && (
-        <p style={{ margin: "0 0 8px", fontSize: 15, fontWeight: 600 }}>
+      {m.status === "played" && squadMode === "p11Mixed" && m.intendedGroup2016 && (
+        <p style={{ margin: "0 0 8px", fontSize: 14, color: "var(--text-secondary)" }}>
           Grupp 2016 (rotation assist): {groupLabelDisp(m.intendedGroup2016)}
         </p>
       )}
@@ -3030,6 +3103,12 @@ function MatchCard({
                     .map((pl) => pl.id);
                   if (currentActive2015.length) {
                     setManualIds(currentActive2015.slice(0, 3));
+                  } else if (matchQueue?.queue2015?.length) {
+                    const seed = matchQueue.queue2015
+                      .filter((q) => q.selectable)
+                      .slice(0, 3)
+                      .map((q) => q.id);
+                    setManualIds(seed);
                   } else if (rotationView?.canonical2015Ids?.length) {
                     const avail = rotationView.canonical2015Ids.filter((id) => {
                       const pl = players2015.find((x) => x.id === id);
@@ -3090,12 +3169,22 @@ function MatchCard({
                 const on = e.target.checked;
                 setShowManual2016(on);
                 if (on) {
-                  const avail = players2016.filter((pl) => isPlayerSelectableForMatch(pl, m)).map((pl) => pl.id);
-                  const canon = (rotationView?.canonical2016Ids || []).filter((id) => avail.includes(id));
-                  const rest = avail
-                    .filter((id) => !canon.includes(id))
-                    .sort((a, b) => playerName(a).localeCompare(playerName(b), "sv"));
-                  const seed = [...canon, ...rest].slice(0, assist2016Target);
+                  let seed = [];
+                  if (matchQueue?.queue2016?.length) {
+                    seed = matchQueue.queue2016
+                      .filter((q) => q.selectable)
+                      .slice(0, assist2016Target)
+                      .map((q) => q.id);
+                  } else {
+                    const avail = players2016
+                      .filter((pl) => isPlayerSelectableForMatch(pl, m))
+                      .map((pl) => pl.id);
+                    const canon = (rotationView?.canonical2016Ids || []).filter((id) => avail.includes(id));
+                    const rest = avail
+                      .filter((id) => !canon.includes(id))
+                      .sort((a, b) => playerName(a).localeCompare(playerName(b), "sv"));
+                    seed = [...canon, ...rest].slice(0, assist2016Target);
+                  }
                   setManual2016Ids(seed.length ? seed : []);
                 } else {
                   setManual2016Ids([]);

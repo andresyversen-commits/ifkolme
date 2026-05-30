@@ -678,45 +678,19 @@ function randomPickIds(ids, count, rng) {
 }
 
 /**
- * Dynamisk kö för 2016-assist i P11:
- * - Räknar historik från genomförda p11Mixed-matcher.
- * - Minst antal assist först.
- * - Vid lika: den som spelade längst sedan (eller aldrig spelat) först.
- * - Därefter minst totala matcher, sedan slump vid exakt lika.
+ * Plockar `nAssist` spelare födda 2016 för P11-assist via den nya rättviskön
+ * (`build2016QueueForMatch`). Säkerställer att urvalet matchar exakt det
+ * klienten visar som "I tur" på matchen. RNG ignoreras (köen är deterministisk
+ * för förutsägbarhet — namn används som final tiebreaker).
  */
-function pickNext2016AssistIds(state, nAssist, rng, match = null) {
-  const eligible = state.players.filter((p) => birthYearNum(p) === 2016 && isPlayerSelectableForMatch(p, match));
-  if (eligible.length < nAssist) throw new Error("cannot_field_2016_assist");
-
-  const assistCount = new Map();
-  const lastAssistOrder = new Map();
-  const playedAssist = state.matches
-    .filter((m) => m.status === "played")
-    .filter((m) => matchSquadMode(m) === "p11Mixed")
-    .sort(compareMatchesChronologically);
-
-  for (let i = 0; i < playedAssist.length; i++) {
-    const m = playedAssist[i];
-    for (const id of m.selectedPlayerIds || []) {
-      const pl = state.players.find((p) => p.id === id);
-      if (birthYearNum(pl) !== 2016) continue;
-      assistCount.set(id, (assistCount.get(id) || 0) + 1);
-      lastAssistOrder.set(id, i);
-    }
-  }
-
-  const withTie = attachRandomTieKeys(eligible, rng);
-  withTie.sort((a, b) => {
-    const aCount = assistCount.get(a.id) || 0;
-    const bCount = assistCount.get(b.id) || 0;
-    if (aCount !== bCount) return aCount - bCount;
-    const aLast = lastAssistOrder.has(a.id) ? lastAssistOrder.get(a.id) : -1;
-    const bLast = lastAssistOrder.has(b.id) ? lastAssistOrder.get(b.id) : -1;
-    if (aLast !== bLast) return aLast - bLast;
-    if (a.matchesPlayed !== b.matchesPlayed) return a.matchesPlayed - b.matchesPlayed;
-    return a._tie - b._tie;
-  });
-  return withTie.slice(0, nAssist).map((p) => p.id);
+function pickNext2016AssistIds(state, nAssist, _rng, match = null) {
+  const queue = build2016QueueForMatch(state, match);
+  const seed = queue
+    .filter((q) => q.selectable)
+    .slice(0, nAssist)
+    .map((q) => q.id);
+  if (seed.length < nAssist) throw new Error("cannot_field_2016_assist");
+  return seed;
 }
 
 export function validateOverride2016(state, overrideIds, exactCount, match = null) {
@@ -942,40 +916,65 @@ export function selectTeamForMatch(state, matchId, opts = {}) {
     return { scheduledGroup, usedOverride: false, text2015, text2016 };
   }
 
-  const scheduledGroup = computeNextGroup2015(state);
-  const canonicalIds = [...(state.groups2015[scheduledGroup] || [])];
-
+  // P 10 mixed: Plocka tre 2015-spelare från rättviskö (färst matcher först,
+  // tiebreaker: längst sedan, därefter namn). Detta ersätter den tidigare
+  // A/B/C-baserade urvalsmodellen där samma trio kunde komma upp på flera
+  // ej spelade matcher i rad eftersom rotation bara avancerade efter spelade
+  // matcher.
   let seed2015;
   let usedOverride = false;
+  let queue2015 = [];
   if (opts.override2015PlayerIds?.length) {
     seed2015 = validateOverride2015(state, opts.override2015PlayerIds, MAX_2015_ON_FIELD, match);
     usedOverride = true;
   } else {
-    seed2015 = canonicalIds.filter((id) => {
-      const pl = state.players.find((p) => p.id === id);
-      return isPlayerSelectableForMatch(pl, match) && isEligibleForMatchSquad(pl);
-    });
+    queue2015 = build2015QueueForMatch(state, match);
+    seed2015 = queue2015
+      .filter((q) => q.selectable)
+      .slice(0, MAX_2015_ON_FIELD)
+      .map((q) => q.id);
+    if (seed2015.length < MAX_2015_ON_FIELD) {
+      throw new Error("cannot_field_three_2015");
+    }
   }
 
   const ids2015 = fill2015Lineup(state, seed2015, rng, match);
   const ids2016 = sortedAvailableIdsByYear(state, 2016, match);
   if (!ids2016.length) throw new Error("no_available_2016");
 
-  match.intendedGroup2015 = scheduledGroup;
+  // Behåll gruppinformation i bakåtkompatibelt syfte (statistik/historik visar
+  // fortfarande "Grupp A/B/C" där det är meningsfullt), men gruppen styr inte
+  // längre urvalet.
+  match.intendedGroup2015 = inferIntendedGroup2015(state.groups2015, ids2015);
   match.intendedGroup2016 = null;
   match.selectedPlayerIds = [...ids2015, ...ids2016];
   pruneMatchUnavailableToSquad(match);
   pruneMatchLineupToSelectedSquad(match);
   pruneDeclinedNotInSquad(match);
 
-  const gLabel = groupLabel(scheduledGroup);
-  const text2015 = usedOverride
-    ? `2015: ${gLabel} vald enligt rotationsschema; manuella ersättare för otillgängliga spelare.`
-    : `2015: ${gLabel} vald enligt rotationsschema.`;
+  let text2015;
+  if (usedOverride) {
+    text2015 = "2015: manuellt urval (ersättare för rotationsförslag).";
+  } else {
+    const namesWithCount = ids2015
+      .map((id) => {
+        const q = queue2015.find((x) => x.id === String(id));
+        const pl = state.players.find((p) => p.id === id);
+        const nm = pl?.name || id;
+        return q ? `${nm} (${q.matchesPlayed} sp.)` : nm;
+      })
+      .join(", ");
+    text2015 = `2015: tre i tur enligt rättviskö (färst matcher först): ${namesWithCount}.`;
+  }
   const text2016 = "2016: Alla tillgängliga spelare födda 2016 tas ut.";
 
   match.selectionExplanation = { text2015, text2016 };
-  return { scheduledGroup, usedOverride, text2015, text2016 };
+  return {
+    scheduledGroup: match.intendedGroup2015,
+    usedOverride,
+    text2015,
+    text2016,
+  };
 }
 
 export function simulateFullSeason(state) {
@@ -1094,6 +1093,165 @@ export function validateSeasonDistribution(players, matchCount = 13, matches = n
   return { ok2015, ok2016, ok: ok2015 && ok2016, min15, max15, min16, max16, spread15, spread16, messages };
 }
 
+/**
+ * Bygger en mapping {playerId → prosjektert antal genomförda matcher} fram till
+ * (men inte inkl.) `asOfMatch`. Tar hänsyn både till matcher som redan är
+ * spelade (via `player.matchesPlayed`) och matcher som ligger kronologiskt
+ * tidigare och har en sparad trupp (`selectedPlayerIds`) som inte är
+ * frånvarande/avbockad.
+ *
+ * Används som "rättvis kö": färst matcher = först i tur.
+ */
+export function projectedMatchCounts(state, asOfMatch, year, modes) {
+  const counts = new Map();
+  const modeSet = new Set(modes || ["mixed"]);
+  for (const p of state.players || []) {
+    if (birthYearNum(p) !== year) continue;
+    counts.set(String(p.id), Number(p.matchesPlayed || 0));
+  }
+  const ordered = (state.matches || [])
+    .filter((m) => modeSet.has(matchSquadMode(m)))
+    .sort(compareMatchesChronologically);
+  for (const m of ordered) {
+    if (asOfMatch && String(m.id) === String(asOfMatch.id)) break;
+    if (m.status === "played") continue; // redan inräknad via matchesPlayed
+    const slots = Array.isArray(m.selectedPlayerIds) ? m.selectedPlayerIds : [];
+    for (const id of slots) {
+      const pid = String(id ?? "").trim();
+      if (!pid) continue;
+      const pl = state.players.find((x) => String(x.id) === pid);
+      if (!pl || birthYearNum(pl) !== year) continue;
+      if (!isPlayerSelectableForMatch(pl, m)) continue;
+      counts.set(pid, (counts.get(pid) || 0) + 1);
+    }
+  }
+  return counts;
+}
+
+/**
+ * Index av siste matchen (genomförd eller med trupp) der spelaren ble valgt,
+ * begrenset til matcher før `asOfMatch`. Lavere indeks = spilte for lengre tid
+ * siden (eller har aldri spilt → -1). Brukes som tiebreaker for å rotere
+ * mellom spillere med samme antall matcher.
+ */
+function lastSelectionIndexes(state, asOfMatch, year, modes) {
+  const idx = new Map();
+  const modeSet = new Set(modes || ["mixed"]);
+  const ordered = (state.matches || [])
+    .filter((m) => modeSet.has(matchSquadMode(m)))
+    .sort(compareMatchesChronologically);
+  let i = 0;
+  for (const m of ordered) {
+    if (asOfMatch && String(m.id) === String(asOfMatch.id)) break;
+    const slots = Array.isArray(m.selectedPlayerIds) ? m.selectedPlayerIds : [];
+    for (const id of slots) {
+      const pid = String(id ?? "").trim();
+      if (!pid) continue;
+      const pl = state.players.find((x) => String(x.id) === pid);
+      if (!pl || birthYearNum(pl) !== year) continue;
+      idx.set(pid, i);
+    }
+    i++;
+  }
+  return idx;
+}
+
+/**
+ * Bygg en sortert "rättvis kö" av 2015-spillere for en gitt match. Inkluderer
+ * alle registrerte 2015-spillere (også de som er otillgängliga / har takkat
+ * nej) med per-spiller-status. Sortering:
+ *
+ *   1. Tilgjengelig for denne matchen først
+ *   2. projectedCount ASC  (færrest matcher først = "rettferdig")
+ *   3. lastSelectionIndex ASC  (lengst siden = først i tur)
+ *   4. Namn ASC (stabilt)
+ */
+export function build2015QueueForMatch(state, match) {
+  const counts = projectedMatchCounts(state, match, 2015, ["mixed"]);
+  const lastIdx = lastSelectionIndexes(state, match, 2015, ["mixed"]);
+  const declined = new Set(
+    (match?.declinedPlayerIds || []).map((id) => String(id ?? "").trim()).filter(Boolean),
+  );
+  const unavail = matchUnavailablePlayerIdSet(match || {});
+  const selected = new Set(
+    (match?.selectedPlayerIds || []).map((id) => String(id ?? "").trim()).filter(Boolean),
+  );
+  const items = (state.players || [])
+    .filter((p) => birthYearNum(p) === 2015)
+    .map((p) => {
+      const pid = String(p.id);
+      const globallyUnavailable = !isPlayerAvailable(p);
+      const unavailableForMatch = unavail.has(pid);
+      const dec = declined.has(pid);
+      const selectable = !globallyUnavailable && !unavailableForMatch && !dec;
+      return {
+        id: pid,
+        name: p.name,
+        projectedCount: counts.get(pid) || 0,
+        matchesPlayed: Number(p.matchesPlayed || 0),
+        lastSelectionIndex: lastIdx.has(pid) ? lastIdx.get(pid) : -1,
+        selectable,
+        globallyUnavailable,
+        unavailableForMatch,
+        declined: dec,
+        inSquad: selected.has(pid),
+      };
+    });
+  items.sort((a, b) => {
+    if (a.selectable !== b.selectable) return a.selectable ? -1 : 1;
+    if (a.projectedCount !== b.projectedCount) return a.projectedCount - b.projectedCount;
+    if (a.lastSelectionIndex !== b.lastSelectionIndex) return a.lastSelectionIndex - b.lastSelectionIndex;
+    return a.name.localeCompare(b.name, "sv");
+  });
+  return items;
+}
+
+/**
+ * Tilsvarende rättvis kö for 2016-spillerne (brukt for P11-assist). Räknar
+ * matchedelaktighet både i P10 (mixed) och P11 (p11Mixed) — det är samme
+ * spilare i samme rotasjon.
+ */
+export function build2016QueueForMatch(state, match) {
+  const modes = ["mixed", "p11Mixed"];
+  const counts = projectedMatchCounts(state, match, 2016, modes);
+  const lastIdx = lastSelectionIndexes(state, match, 2016, modes);
+  const declined = new Set(
+    (match?.declinedPlayerIds || []).map((id) => String(id ?? "").trim()).filter(Boolean),
+  );
+  const unavail = matchUnavailablePlayerIdSet(match || {});
+  const selected = new Set(
+    (match?.selectedPlayerIds || []).map((id) => String(id ?? "").trim()).filter(Boolean),
+  );
+  const items = (state.players || [])
+    .filter((p) => birthYearNum(p) === 2016)
+    .map((p) => {
+      const pid = String(p.id);
+      const globallyUnavailable = !isPlayerAvailable(p);
+      const unavailableForMatch = unavail.has(pid);
+      const dec = declined.has(pid);
+      const selectable = !globallyUnavailable && !unavailableForMatch && !dec;
+      return {
+        id: pid,
+        name: p.name,
+        projectedCount: counts.get(pid) || 0,
+        matchesPlayed: Number(p.matchesPlayed || 0),
+        lastSelectionIndex: lastIdx.has(pid) ? lastIdx.get(pid) : -1,
+        selectable,
+        globallyUnavailable,
+        unavailableForMatch,
+        declined: dec,
+        inSquad: selected.has(pid),
+      };
+    });
+  items.sort((a, b) => {
+    if (a.selectable !== b.selectable) return a.selectable ? -1 : 1;
+    if (a.projectedCount !== b.projectedCount) return a.projectedCount - b.projectedCount;
+    if (a.lastSelectionIndex !== b.lastSelectionIndex) return a.lastSelectionIndex - b.lastSelectionIndex;
+    return a.name.localeCompare(b.name, "sv");
+  });
+  return items;
+}
+
 export function rotationQueueSummary(state) {
   repairGroups2015IfNeeded(state);
   const played = state.matches.filter((m) => m.status === "played" && m.intendedGroup2015);
@@ -1143,6 +1301,41 @@ export function buildRotationView(state) {
   const canonical2016Ids = validateGroups2016(state)
     ? [...(state.groups2016[nextGroup2016] || [])].slice(0, 3)
     : [];
+
+  // Per-match-kö: för varje ej spelad match exponeras ordnad lista över
+  // tillgängliga 2015 (och 2016 vid P11 assist). Detta gör att klienten kan
+  // visa exakt vem som står på tur just för den matchen — utan att gissa
+  // baserat på global "nästa grupp".
+  const queueByMatch = {};
+  for (const m of state.matches || []) {
+    if (m.status === "played") continue;
+    const mode = matchSquadMode(m);
+    if (mode === "mixed") {
+      queueByMatch[m.id] = {
+        mode,
+        branch: m.branch || "p10",
+        slots2015: MAX_2015_ON_FIELD,
+        queue2015: build2015QueueForMatch(state, m),
+      };
+    } else if (mode === "p11Mixed") {
+      const nAssist = p11Assist2016Count(m, state);
+      queueByMatch[m.id] = {
+        mode,
+        branch: m.branch || "p11",
+        slots2016: nAssist,
+        queue2015: build2015QueueForMatch(state, m),
+        queue2016: build2016QueueForMatch(state, m),
+      };
+    } else if (mode === "all2015") {
+      queueByMatch[m.id] = {
+        mode,
+        branch: m.branch || "p11",
+        slots2015: null,
+        queue2015: build2015QueueForMatch(state, m),
+      };
+    }
+  }
+
   return {
     nextGroup2015,
     nextGroupLabel: groupLabel(nextGroup2015),
@@ -1152,6 +1345,7 @@ export function buildRotationView(state) {
     canonical2016Ids,
     queue: rotationQueueSummary(state),
     queue2016: rotationQueueSummary2016(state),
+    queueByMatch,
     groupsValid: validateGroups2015(state),
     groups2016Valid: validateGroups2016(state),
   };
