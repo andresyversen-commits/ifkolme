@@ -4213,10 +4213,26 @@ export default function App() {
       });
       await load({ silent: true, prefetched: next });
       const createdId = next?.createdMatchId;
+      const createdMatch = createdId
+        ? (next?.matches || []).find((m) => m.id === createdId)
+        : null;
+      // Sørg for at den nye matchen alltid blir synlig:
+      //  – «Kommande»-filteret matcher en ny match (status=not_played).
+      //  – Kalenderen navigeres til matchens måned så brukeren ser den i agendaen.
+      //  – Detaljpanelet får matchen aktivert.
+      setMatchListScope("upcoming");
+      if (createdMatch?.fixture?.date) {
+        const dt = parseIsoDateLocal(createdMatch.fixture.date);
+        if (dt) {
+          setCalendarMonthKey(
+            monthKeyOf(new Date(dt.getFullYear(), dt.getMonth(), 1)),
+          );
+        }
+      }
       if (createdId) {
         setActiveMatchId(createdId);
-        setShowMatchCalendar(false);
       }
+      setShowMatchCalendar(true);
       setManualMatchOpen(false);
       setOkMsg("Match tillagd.");
     } catch (e) {
