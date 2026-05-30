@@ -1353,7 +1353,7 @@ function MinFotbollFixture({ fixture, getStoredTeamLogo }) {
   );
 }
 
-function MatchFixtureEditor({ matchId, fixture, isP11Series, onSaved, setErr }) {
+function MatchFixtureEditor({ matchId, fixture, isP11Series, onSaved, setErr, isManualMatch, onDelete }) {
   const [draft, setDraft] = useState(() => fixtureToDraft(fixture));
   const [busy, setBusy] = useState(false);
 
@@ -1490,7 +1490,26 @@ function MatchFixtureEditor({ matchId, fixture, isP11Series, onSaved, setErr }) 
         >
           Återställ
         </button>
+        {isManualMatch && typeof onDelete === "function" ? (
+          <button
+            type="button"
+            className="btn btn--danger fixture-editor__delete-btn"
+            disabled={busy}
+            onClick={() => {
+              if (window.confirm("Ta bort den här manuellt skapade matchen? Det går inte att ångra.")) {
+                onDelete();
+              }
+            }}
+          >
+            Ta bort match
+          </button>
+        ) : null}
       </div>
+      {isManualMatch ? (
+        <p className="text-muted" style={{ marginTop: 6, fontSize: 12 }}>
+          Manuellt skapad match — röras inte av MinFotboll-synken.
+        </p>
+      ) : null}
     </div>
   );
 }
@@ -1767,6 +1786,7 @@ function MatchCard({
   cardTitle = "Match",
   displayNumber,
   getStoredTeamLogo,
+  onDeleteManualMatch,
 }) {
   const squadMode = matchSquadMode(m);
   const series = typeof m.fixture?.series === "string" ? m.fixture.series : "";
@@ -2380,6 +2400,12 @@ function MatchCard({
             isP11Series={isP11Series}
             setErr={setErr}
             onSaved={() => load({ silent: true })}
+            isManualMatch={m.manualSource === true}
+            onDelete={
+              m.manualSource === true && typeof onDeleteManualMatch === "function"
+                ? () => onDeleteManualMatch(m.id)
+                : undefined
+            }
           />
         </div>
       ) : null}
@@ -3325,6 +3351,175 @@ function MatchCard({
   );
 }
 
+function ManualMatchModal({ open, busy, onCancel, onSubmit, setErr }) {
+  const today = new Date().toISOString().slice(0, 10);
+  const emptyDraft = {
+    branch: "p10",
+    series: "",
+    association: "",
+    date: today,
+    time: "",
+    venue: "",
+    home: "",
+    away: "",
+    p11Assist2016: 3,
+  };
+  const [draft, setDraft] = useState(emptyDraft);
+
+  useEffect(() => {
+    if (open) {
+      setDraft({ ...emptyDraft, date: today });
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [open]);
+
+  if (!open) return null;
+  const setField = (k, v) => setDraft((d) => ({ ...d, [k]: v }));
+  const isP11 = draft.branch === "p11";
+
+  const submit = async (e) => {
+    e.preventDefault();
+    if (busy) return;
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(draft.date)) {
+      setErr("Ange ett giltigt datum (ÅÅÅÅ-MM-DD).");
+      return;
+    }
+    if (draft.time && !/^\d{2}:\d{2}$/.test(draft.time)) {
+      setErr("Ange tiden som HH:MM eller lämna tomt.");
+      return;
+    }
+    if (!draft.home.trim() && !draft.away.trim()) {
+      setErr("Ange minst ett av hemma- och bortalag.");
+      return;
+    }
+    try {
+      await onSubmit({ ...draft, p11Assist2016: isP11 ? draft.p11Assist2016 : 0 });
+    } catch {
+      // onSubmit visar redan felmeddelandet via setErr.
+    }
+  };
+
+  return (
+    <div className="modal-overlay" role="dialog" aria-modal="true" aria-label="Lägg till match">
+      <div className="modal-sheet" onClick={(e) => e.stopPropagation()}>
+        <h3 className="modal-sheet__title">Lägg till match</h3>
+        <p className="text-muted" style={{ margin: "0 0 12px", fontSize: 13 }}>
+          Skapa en match som inte ligger i MinFotboll (t.ex. träningsmatch). Manuella matcher röras
+          aldrig av ICS-synken.
+        </p>
+        <form onSubmit={submit} className="fixture-editor">
+          <div className="fixture-editor__grid">
+            <label className="field fixture-editor__field--wide">
+              <span className="field__label">Lag</span>
+              <select
+                className="field__select"
+                value={draft.branch}
+                onChange={(e) => setField("branch", e.target.value)}
+              >
+                <option value="p10">P10 (2015/2016)</option>
+                <option value="p11">P11 (2014/2015)</option>
+              </select>
+            </label>
+            <label className="field">
+              <span className="field__label">Datum</span>
+              <input
+                type="date"
+                className="field__input"
+                value={draft.date}
+                onChange={(e) => setField("date", e.target.value)}
+                required
+              />
+            </label>
+            <label className="field">
+              <span className="field__label">Tid</span>
+              <input
+                type="time"
+                className="field__input"
+                value={draft.time}
+                onChange={(e) => setField("time", e.target.value)}
+                placeholder="HH:MM"
+              />
+            </label>
+            <label className="field fixture-editor__field--wide">
+              <span className="field__label">Plan</span>
+              <input
+                type="text"
+                className="field__input"
+                value={draft.venue}
+                onChange={(e) => setField("venue", e.target.value)}
+                placeholder="t.ex. Kanalplan"
+              />
+            </label>
+            <label className="field">
+              <span className="field__label">Hemmalag</span>
+              <input
+                type="text"
+                className="field__input"
+                value={draft.home}
+                onChange={(e) => setField("home", e.target.value)}
+                placeholder="t.ex. IFK Ölme"
+              />
+            </label>
+            <label className="field">
+              <span className="field__label">Bortalag</span>
+              <input
+                type="text"
+                className="field__input"
+                value={draft.away}
+                onChange={(e) => setField("away", e.target.value)}
+                placeholder="Motståndare"
+              />
+            </label>
+            <label className="field fixture-editor__field--wide">
+              <span className="field__label">Serie</span>
+              <input
+                type="text"
+                className="field__input"
+                value={draft.series}
+                onChange={(e) => setField("series", e.target.value)}
+                placeholder={isP11 ? "t.ex. P 11 SVART 2026" : "t.ex. P 10 GRÖN 2026"}
+              />
+            </label>
+            <label className="field fixture-editor__field--wide">
+              <span className="field__label">Förbund</span>
+              <input
+                type="text"
+                className="field__input"
+                value={draft.association}
+                onChange={(e) => setField("association", e.target.value)}
+                placeholder="t.ex. Värmlands FF"
+              />
+            </label>
+            {isP11 ? (
+              <label className="field">
+                <span className="field__label">Antal födda 2016 (assist)</span>
+                <input
+                  type="number"
+                  inputMode="numeric"
+                  pattern="[0-9]*"
+                  min={0}
+                  max={20}
+                  className="field__input"
+                  value={draft.p11Assist2016}
+                  onChange={(e) => setField("p11Assist2016", e.target.value)}
+                />
+              </label>
+            ) : null}
+          </div>
+          <div className="modal-sheet__actions">
+            <button type="button" className="btn btn--secondary" onClick={onCancel} disabled={busy}>
+              Avbryt
+            </button>
+            <button type="submit" className="btn btn--primary" disabled={busy}>
+              {busy ? "Sparar…" : "Skapa match"}
+            </button>
+          </div>
+        </form>
+      </div>
+    </div>
+  );
+}
+
 export default function App() {
   const [state, setState] = useState(null);
   const [err, setErr] = useState("");
@@ -3353,6 +3548,8 @@ export default function App() {
   /** Matcher-flik: lista kommande, spelade eller alla (med datum i kalender). */
   const [matchListScope, setMatchListScope] = useState("upcoming");
   const [showMatchCalendar, setShowMatchCalendar] = useState(true);
+  const [manualMatchOpen, setManualMatchOpen] = useState(false);
+  const [manualMatchBusy, setManualMatchBusy] = useState(false);
   const [playersSort, setPlayersSort] = useState({ key: "birthYear", dir: "asc" });
   const [importing, setImporting] = useState(false);
   const [deferredInstallPrompt, setDeferredInstallPrompt] = useState(null);
@@ -3991,6 +4188,56 @@ export default function App() {
     setActiveMatchId(matchId);
     setShowMatchCalendar(false);
   }, []);
+
+  const createManualMatch = useCallback(async (draft) => {
+    setErr("");
+    setManualMatchBusy(true);
+    try {
+      const branch = draft.branch === "p11" ? "p11" : "p10";
+      const fixture = {
+        series: draft.series,
+        association: draft.association,
+        date: draft.date,
+        time: draft.time,
+        venue: draft.venue,
+        home: draft.home,
+        away: draft.away,
+      };
+      if (branch === "p11") {
+        const n = Math.floor(Number(draft.p11Assist2016));
+        fixture.p11Assist2016 = Number.isFinite(n) ? Math.max(0, Math.min(20, n)) : 3;
+      }
+      const next = await api("/api/matches", {
+        method: "POST",
+        body: { branch, fixture },
+      });
+      await load({ silent: true, prefetched: next });
+      const createdId = next?.createdMatchId;
+      if (createdId) {
+        setActiveMatchId(createdId);
+        setShowMatchCalendar(false);
+      }
+      setManualMatchOpen(false);
+      setOkMsg("Match tillagd.");
+    } catch (e) {
+      setErr(e.message || "Kunde inte skapa match.");
+      throw e;
+    } finally {
+      setManualMatchBusy(false);
+    }
+  }, [load]);
+
+  const deleteManualMatch = useCallback(async (matchId) => {
+    setErr("");
+    try {
+      const next = await api(`/api/matches/${matchId}`, { method: "DELETE" });
+      await load({ silent: true, prefetched: next });
+      setActiveMatchId("");
+      setOkMsg("Match borttagen.");
+    } catch (e) {
+      setErr(e.message || "Kunde inte ta bort match.");
+    }
+  }, [load]);
 
   function playerName(id) {
     return state?.players.find((p) => p.id === id)?.name ?? id;
@@ -4902,14 +5149,30 @@ export default function App() {
                   Alla
                 </button>
               </div>
-              <button
-                type="button"
-                className="btn btn--secondary btn--sm"
-                onClick={() => setShowMatchCalendar((v) => !v)}
-              >
-                {showMatchCalendar ? "Dölj kalender" : "Visa kalender"}
-              </button>
+              <div className="matches-layout__toolbar-actions">
+                <button
+                  type="button"
+                  className="btn btn--primary btn--sm"
+                  onClick={() => setManualMatchOpen(true)}
+                >
+                  + Lägg till match
+                </button>
+                <button
+                  type="button"
+                  className="btn btn--secondary btn--sm"
+                  onClick={() => setShowMatchCalendar((v) => !v)}
+                >
+                  {showMatchCalendar ? "Dölj kalender" : "Visa kalender"}
+                </button>
+              </div>
             </div>
+            <ManualMatchModal
+              open={manualMatchOpen}
+              busy={manualMatchBusy}
+              onCancel={() => setManualMatchOpen(false)}
+              onSubmit={createManualMatch}
+              setErr={setErr}
+            />
             {showMatchCalendar && <div className="matches-layout__calendar">
               <h3 className="panel__title" style={{ fontSize: 17, margin: "0 0 8px" }}>
                 Matchkalender
@@ -5102,6 +5365,7 @@ export default function App() {
                     cardTitle="Match"
                     displayNumber={activeMatch?.number}
                     getStoredTeamLogo={getStoredTeamLogo}
+                    onDeleteManualMatch={deleteManualMatch}
                   />
                 </div>
               ) : (

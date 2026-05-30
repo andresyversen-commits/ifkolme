@@ -2443,6 +2443,37 @@ a {
   justify-content: space-between;
 }
 
+.matches-layout__toolbar-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  align-items: center;
+  justify-content: flex-end;
+}
+
+@media (max-width: 519px) {
+  .matches-layout__toolbar-actions {
+    width: 100%;
+    justify-content: flex-start;
+  }
+
+  .matches-layout__toolbar-actions .btn--sm {
+    flex: 1 1 auto;
+    min-width: 0;
+  }
+}
+
+.fixture-editor__delete-btn {
+  margin-left: auto;
+}
+
+@media (max-width: 519px) {
+  .fixture-editor__delete-btn {
+    margin-left: 0;
+    width: 100%;
+  }
+}
+
 .matches-layout__toolbar .segmented.segmented--scroll {
   flex: 1 1 auto;
   min-width: 0;

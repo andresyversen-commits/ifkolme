@@ -190,8 +190,10 @@ function syncFixturesFromIcs(state, fixtures) {
   };
   const touched = [];
   for (const branch of ["p10", "p11"]) {
+    // Manuelt skapade matcher (manualSource) parar vi aldrig med ICS — användaren
+    // har lagt in dem själv och ska aldrig få sin date/venue/teams överskrivna.
     const targetMatches = (state.matches || [])
-      .filter((m) => (m.branch || "p10") === branch)
+      .filter((m) => (m.branch || "p10") === branch && !m.manualSource)
       .sort(compareMatchesChronologically);
     const src = byBranch[branch];
     const n = Math.min(targetMatches.length, src.length);
@@ -1396,6 +1398,101 @@ app.put("/api/groups2016", async (req, res) => {
   state.groups2016Extra = extraList;
   await writeState(state);
   res.json(jsonState(state));
+});
+
+// POST /api/matches — opprett en manuell match (treningskamp eller saknad seriematch).
+// Markeres med manualSource: true og fixtureScheduleLocked: true så ICS-sync og
+// seed-merge ikke overskriver den.
+app.post("/api/matches", async (req, res) => {
+  try {
+    const state = await readState();
+    const body = req.body || {};
+    const branch = body.branch === "p11" ? "p11" : "p10";
+    const f = body.fixture || {};
+    const date = String(f.date || "").trim();
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) {
+      return res.status(400).json({ error: "Ogiltigt datum (ÅÅÅÅ-MM-DD)." });
+    }
+    const home = String(f.home || "").trim();
+    const away = String(f.away || "").trim();
+    if (!home && !away) {
+      return res.status(400).json({ error: "Ange minst ett av hemma- och bortalag." });
+    }
+    const time = String(f.time || "").trim();
+    if (time && !/^\d{2}:\d{2}$/.test(time)) {
+      return res.status(400).json({ error: "Ogiltig tid (HH:MM)." });
+    }
+
+    const ts = Date.now().toString(36);
+    const rnd = Math.random().toString(36).slice(2, 6);
+    const id = `mx-${branch}-${ts}-${rnd}`;
+    const maxNum = Math.max(
+      0,
+      ...(state.matches || []).map((m) => Number(m.number) || 0),
+    );
+
+    const fixture = {
+      series: String(f.series || "").trim(),
+      association: String(f.association || "").trim(),
+      date,
+      time,
+      venue: String(f.venue || "").trim(),
+      home,
+      away,
+    };
+    if (branch === "p11") {
+      const n = Math.floor(Number(f.p11Assist2016));
+      fixture.p11Assist2016 = Number.isFinite(n) ? Math.max(0, Math.min(20, n)) : 3;
+    }
+
+    state.matches.push({
+      id,
+      number: maxNum + 1,
+      matchNumber: maxNum + 1,
+      branch,
+      status: "not_played",
+      selectedPlayerIds: [],
+      selectedPlayers: [],
+      declinedPlayerIds: [],
+      unavailablePlayerIds: [],
+      intendedGroup2015: null,
+      group2015: null,
+      intendedGroup2016: null,
+      selectionExplanation: null,
+      comments: [],
+      note: "",
+      lineup: null,
+      fixture,
+      fixtureScheduleLocked: true,
+      manualSource: true,
+    });
+    state.matches.sort(compareMatchesChronologically);
+    await writeState(state);
+    res.json({ ...jsonState(state), createdMatchId: id });
+  } catch (e) {
+    res.status(500).json({ error: e.message || "Kunde inte skapa match." });
+  }
+});
+
+// DELETE /api/matches/:id — endast tillåtet för manuellt skapade matcher,
+// så att seed-/ICS-matcher inte kan raderas av misstag.
+app.delete("/api/matches/:id", async (req, res) => {
+  try {
+    const state = await readState();
+    const idx = (state.matches || []).findIndex((m) => m.id === req.params.id);
+    if (idx === -1) return res.status(404).json({ error: "Match hittades inte." });
+    const target = state.matches[idx];
+    if (!target.manualSource) {
+      return res.status(400).json({
+        error: "Endast manuellt skapade matcher kan tas bort.",
+      });
+    }
+    state.matches.splice(idx, 1);
+    await writeState(state);
+    res.json(jsonState(state));
+  } catch (e) {
+    res.status(500).json({ error: e.message || "Kunde inte ta bort match." });
+  }
 });
 
 app.put("/api/matches/:id/fixture", async (req, res) => {
