@@ -13,6 +13,7 @@
 html {
   -webkit-text-size-adjust: 100%;
   overflow-x: hidden;
+  overflow-y: auto;
   /* Stabil vy under sticky header/keyboard på mobil */
   scroll-padding-top: 12px;
   scroll-padding-bottom: 96px;
@@ -28,10 +29,10 @@ body {
   min-height: 100dvh;
   -webkit-font-smoothing: antialiased;
   overflow-x: hidden;
+  overflow-y: auto;
+  -webkit-overflow-scrolling: touch;
   --page-gutter-safe-left: max(var(--page-gutter), env(safe-area-inset-left));
   --page-gutter-safe-right: max(var(--page-gutter), env(safe-area-inset-right));
-  /* Forhindre at hele siden scroller når en modal/scroller scrolles til kanten */
-  overscroll-behavior-y: none;
 }
 
 /* iOS zoomer inn på inputs med font-size < 16px ved fokus.
@@ -53,6 +54,7 @@ a {
 #root {
   min-height: 100dvh;
   overflow-x: hidden;
+  overflow-y: visible;
   width: 100%;
   max-width: 100%;
 }
@@ -67,6 +69,8 @@ a {
   padding-left: var(--page-gutter-safe-left);
   padding-bottom: max(24px, env(safe-area-inset-bottom));
   overflow-x: clip;
+  overflow-y: visible;
+  min-height: 100dvh;
 }
 
 .app > * {
