@@ -22,7 +22,9 @@
  *
  * SERIETYP (fixture.series)
  * -------------------------
- * "P 10 …" → samma som blandat läge: tre födda 2015 (rotation A/B/C) + alla tillgängliga 2016.
+ * "P 10 …" → blandat läge: tre födda 2015 (rättviskö) + födda 2016.
+ *   fixture.p10Count2016 saknas/null → alla tillgängliga 2016.
+ *   fixture.p10Count2016 = N → exakt N födda 2016 enligt rättviskö (manuellt alternativ).
  * "P 11 …" utan assist → alla tillgängliga födda 2015; inga 2016.
  * "P 11 …" med fixture.p11Assist2016 = N (N>0) → alla 2015 + N stycken 2016 enligt kö
  * (schemalagd 2016-grupp A/B/C, se groups2016) med manuellt alternativ.
@@ -726,6 +728,20 @@ export function p11Assist2016Count(match, state) {
 }
 
 /**
+ * Antal födda 2016 på en P 10-match (mixed).
+ * `null` = ingen begränsning (alla tillgängliga, bakåtkompatibelt default).
+ * Annars ett icke-negativt tal, kapad till antal globalt tillgängliga 2016.
+ */
+export function p10Count2016(match, state) {
+  const raw = match?.fixture?.p10Count2016;
+  if (raw === undefined || raw === null || raw === "") return null;
+  const n = Math.floor(Number(raw));
+  if (!Number.isFinite(n) || n < 0) return null;
+  const cap = (state?.players || []).filter((p) => birthYearNum(p) === 2016 && isPlayerAvailable(p)).length;
+  return Math.min(n, Math.max(0, cap));
+}
+
+/**
  * P 10 ska numera alltid inkludera tre 2015-spelare (mixed). Äldre sparade trupper
  * med bara 2016 är ogiltiga — rensa så "Välj lag" kan köras om.
  */
@@ -819,8 +835,15 @@ export function validateMatchSquadForComplete(state, match, selectedPlayerIds) {
     if (count2015 !== MAX_2015_ON_FIELD) {
       return { ok: false, error: "Exakt tre spelare födda 2015 krävs för att genomföra matchen." };
     }
-    const sel2016 = ids.filter((id) => birthYearNum(state.players.find((p) => p.id === id)) === 2016);
-    if (sel2016.length < 1) {
+    const limit2016 = p10Count2016(match, state);
+    if (limit2016 != null) {
+      if (count2016 !== limit2016) {
+        return {
+          ok: false,
+          error: `Exakt ${limit2016} spelare födda 2016 krävs. Välj lag på nytt eller ändra antalet i matchinfo.`,
+        };
+      }
+    } else if (count2016 < 1) {
       return { ok: false, error: "Minst en spelare födda 2016 krävs i den valda truppen." };
     }
   }
@@ -939,14 +962,33 @@ export function selectTeamForMatch(state, matchId, opts = {}) {
   }
 
   const ids2015 = fill2015Lineup(state, seed2015, rng, match);
-  const ids2016 = sortedAvailableIdsByYear(state, 2016, match);
-  if (!ids2016.length) throw new Error("no_available_2016");
+
+  const limit2016 = p10Count2016(match, state);
+  let ids2016;
+  let used2016Override = false;
+  if (opts.override2016PlayerIds?.length) {
+    const exact = limit2016 != null ? limit2016 : opts.override2016PlayerIds.length;
+    ids2016 = validateOverride2016(state, opts.override2016PlayerIds, exact, match);
+    used2016Override = true;
+  } else if (limit2016 != null) {
+    if (limit2016 === 0) {
+      ids2016 = [];
+    } else {
+      ids2016 = pickNext2016AssistIds(state, limit2016, rng, match);
+    }
+  } else {
+    ids2016 = sortedAvailableIdsByYear(state, 2016, match);
+    if (!ids2016.length) throw new Error("no_available_2016");
+  }
 
   // Behåll gruppinformation i bakåtkompatibelt syfte (statistik/historik visar
   // fortfarande "Grupp A/B/C" där det är meningsfullt), men gruppen styr inte
   // längre urvalet.
   match.intendedGroup2015 = inferIntendedGroup2015(state.groups2015, ids2015);
-  match.intendedGroup2016 = null;
+  match.intendedGroup2016 =
+    limit2016 != null && ids2016.length
+      ? inferIntendedGroup2016(state.groups2016, ids2016)
+      : null;
   match.selectedPlayerIds = [...ids2015, ...ids2016];
   pruneMatchUnavailableToSquad(match);
   pruneMatchLineupToSelectedSquad(match);
@@ -966,12 +1008,23 @@ export function selectTeamForMatch(state, matchId, opts = {}) {
       .join(", ");
     text2015 = `2015: tre i tur enligt rättviskö (färst matcher först): ${namesWithCount}.`;
   }
-  const text2016 = "2016: Alla tillgängliga spelare födda 2016 tas ut.";
+  let text2016;
+  if (used2016Override) {
+    text2016 = `2016: manuellt urval (${ids2016.length} spelare).`;
+  } else if (limit2016 != null) {
+    text2016 =
+      limit2016 === 0
+        ? "2016: inga spelare födda 2016 (antal satt till 0 i matchinfo)."
+        : `2016: ${limit2016} spelare enligt rättviskö (färst matcher först).`;
+  } else {
+    text2016 = "2016: Alla tillgängliga spelare födda 2016 tas ut.";
+  }
 
   match.selectionExplanation = { text2015, text2016 };
   return {
     scheduledGroup: match.intendedGroup2015,
     usedOverride,
+    used2016Override,
     text2015,
     text2016,
   };
@@ -1057,7 +1110,10 @@ export function validateSeasonDistribution(players, matchCount = 13, matches = n
   const totalSlots2016 = hasMatchContext
     ? list.reduce((acc, m) => {
         const mode = matchSquadMode(m);
-        if (mode === "mixed") return acc + n16;
+        if (mode === "mixed") {
+          const lim = p10Count2016(m, { players });
+          return acc + (lim != null ? lim : n16);
+        }
         if (mode === "p11Mixed") {
           const raw = Math.floor(Number(m?.fixture?.p11Assist2016 ?? 0));
           const assist = Number.isFinite(raw) ? Math.max(0, Math.min(raw, n16)) : 0;
@@ -1311,11 +1367,14 @@ export function buildRotationView(state) {
     if (m.status === "played") continue;
     const mode = matchSquadMode(m);
     if (mode === "mixed") {
+      const limit2016 = p10Count2016(m, state);
       queueByMatch[m.id] = {
         mode,
         branch: m.branch || "p10",
         slots2015: MAX_2015_ON_FIELD,
+        slots2016: limit2016,
         queue2015: build2015QueueForMatch(state, m),
+        queue2016: build2016QueueForMatch(state, m),
       };
     } else if (mode === "p11Mixed") {
       const nAssist = p11Assist2016Count(m, state);

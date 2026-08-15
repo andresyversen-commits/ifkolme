@@ -9,6 +9,7 @@ import {
   matchSquadMode,
   matchBranchKey,
   p11Assist2016Count,
+  p10Count2016,
   compareMatchesChronologically,
   playerCountsAsPlayedInMatchForTeamScope,
   playerMatchParticipationKind,
@@ -1026,10 +1027,14 @@ function fixtureToDraft(fixture) {
     home: String(fixture?.home || fixture?.homeTeam || ""),
     away: String(fixture?.away || fixture?.awayTeam || ""),
     p11Assist2016: String(fixture?.p11Assist2016 ?? 0),
+    p10Count2016:
+      fixture?.p10Count2016 === undefined || fixture?.p10Count2016 === null
+        ? ""
+        : String(fixture.p10Count2016),
   };
 }
 
-function buildFixtureSaveBody(draft, { includeP11Assist = false } = {}) {
+function buildFixtureSaveBody(draft, { includeP11Assist = false, includeP10Count2016 = false } = {}) {
   const trimmedTime = String(draft.time || "").trim();
   const body = {
     series: String(draft.series || "").trim(),
@@ -1043,6 +1048,15 @@ function buildFixtureSaveBody(draft, { includeP11Assist = false } = {}) {
   if (includeP11Assist) {
     const n = Math.floor(Number(draft.p11Assist2016));
     body.p11Assist2016 = Number.isFinite(n) ? Math.max(0, Math.min(20, n)) : 0;
+  }
+  if (includeP10Count2016) {
+    const raw = String(draft.p10Count2016 ?? "").trim();
+    if (raw === "") {
+      body.p10Count2016 = null;
+    } else {
+      const n = Math.floor(Number(raw));
+      body.p10Count2016 = Number.isFinite(n) ? Math.max(0, Math.min(20, n)) : null;
+    }
   }
   return body;
 }
@@ -1435,7 +1449,10 @@ function MatchFixtureEditor({ matchId, fixture, isP11Series, onSaved, setErr, is
     try {
       await api(`/api/matches/${matchId}/fixture`, {
         method: "PUT",
-        body: buildFixtureSaveBody(draft, { includeP11Assist: isP11Series }),
+        body: buildFixtureSaveBody(draft, {
+          includeP11Assist: isP11Series,
+          includeP10Count2016: !isP11Series,
+        }),
       });
       await onSaved();
     } catch (x) {
@@ -1530,7 +1547,25 @@ function MatchFixtureEditor({ matchId, fixture, isP11Series, onSaved, setErr, is
               onChange={(e) => setField("p11Assist2016", e.target.value)}
             />
           </label>
-        ) : null}
+        ) : (
+          <label className="field">
+            <span className="field__label">Antal födda 2016</span>
+            <input
+              type="number"
+              inputMode="numeric"
+              pattern="[0-9]*"
+              min={0}
+              max={20}
+              className="field__input"
+              value={draft.p10Count2016}
+              onChange={(e) => setField("p10Count2016", e.target.value)}
+              placeholder="Alla"
+            />
+            <span className="field__hint" style={{ fontSize: 12, color: "var(--text-secondary)", marginTop: 4 }}>
+              Lämna tomt för alla tillgängliga. Sätt t.ex. 3 för att begränsa.
+            </span>
+          </label>
+        )}
       </div>
       <div className="fixture-editor__actions">
         <button type="button" className="btn btn--primary" onClick={save} disabled={busy}>
@@ -1850,6 +1885,14 @@ function MatchCard({
   const isP11Series = series.includes("P 11");
   const isP11Branch = (m.branch || "p10") === "p11";
   const assist2016Target = isP11Series ? p11Assist2016Count(m, state) : 0;
+  const p10Count2016Target = squadMode === "mixed" ? p10Count2016(m, state) : null;
+  const limited2016Target =
+    squadMode === "p11Mixed"
+      ? assist2016Target
+      : squadMode === "mixed" && p10Count2016Target != null
+        ? p10Count2016Target
+        : null;
+  const showManual2016Option = limited2016Target != null && limited2016Target > 0;
   const n15 = m.selectedPlayerIds.filter((id) => players2015.some((p) => p.id === id)).length;
   const n16 = m.selectedPlayerIds.filter((id) => players2016.some((p) => p.id === id)).length;
   const n14 = m.selectedPlayerIds.filter((id) => birthYearNum(state.players.find((p) => p.id === id)) === 2014).length;
@@ -2051,8 +2094,8 @@ function MatchCard({
   const atLimit = manualIds.length >= 3;
 
   const toggle2016 = (id) => {
-    const max = assist2016Target;
-    if (max <= 0) return;
+    const max = limited2016Target;
+    if (max == null || max <= 0) return;
     setManual2016Ids((prev) => {
       if (prev.includes(id)) return prev.filter((x) => x !== id);
       if (prev.length >= max) return prev;
@@ -2060,7 +2103,7 @@ function MatchCard({
     });
   };
 
-  const p11Manual2016Ok = !showManual2016 || manual2016Ids.length === assist2016Target;
+  const manual2016Ok = !showManual2016 || limited2016Target == null || manual2016Ids.length === limited2016Target;
   const matchNo = displayNumber ?? m.number;
   const declinedPlayerIds = Array.isArray(m.declinedPlayerIds) ? m.declinedPlayerIds : [];
   const declinedSet = new Set(declinedPlayerIds);
@@ -2405,13 +2448,31 @@ function MatchCard({
           }
         />
       ) : null}
-      {m.status !== "played" && matchQueue?.queue2016 && matchQueue.mode === "p11Mixed" && matchQueue.slots2016 > 0 ? (
+      {m.status !== "played" && matchQueue?.queue2016 && matchQueue.slots2016 != null && matchQueue.slots2016 > 0 ? (
         <QueuePanel
-          title={`2016 (assist) — i tur för denna match`}
-          subtitle={`Färst matcher som assist först. ${matchQueue.slots2016} spelare tas ut.`}
+          title={
+            matchQueue.mode === "p11Mixed"
+              ? "2016 (assist) — i tur för denna match"
+              : "2016 — i tur för denna match"
+          }
+          subtitle={
+            matchQueue.mode === "p11Mixed"
+              ? `Färst matcher först. ${matchQueue.slots2016} spelare tas ut.`
+              : `Begränsat till ${matchQueue.slots2016} spelare (ändra i matchinfo). Färst matcher först.`
+          }
           queue={matchQueue.queue2016}
           slots={matchQueue.slots2016}
         />
+      ) : null}
+      {m.status !== "played" && squadMode === "mixed" && p10Count2016Target === 0 ? (
+        <p className="text-muted" style={{ margin: "0 0 12px", fontSize: 13 }}>
+          Inga födda 2016 tas ut i den här matchen (antal satt till 0 i matchinfo).
+        </p>
+      ) : null}
+      {m.status !== "played" && squadMode === "mixed" && p10Count2016Target == null ? (
+        <p className="text-muted" style={{ margin: "0 0 12px", fontSize: 13 }}>
+          Födda 2016: alla tillgängliga tas ut. Sätt antal under Matchinfo för att begränsa.
+        </p>
       ) : null}
 
       {m.status === "played" && m.intendedGroup2015 && (
@@ -3159,7 +3220,7 @@ function MatchCard({
         </div>
       )}
 
-      {matchSubTab === "squad" && m.status !== "played" && squadMode === "p11Mixed" && assist2016Target > 0 && (
+      {matchSubTab === "squad" && m.status !== "played" && showManual2016Option && (
         <div style={{ marginBottom: 12 }}>
           <label className="cb-row" style={{ cursor: "pointer" }}>
             <input
@@ -3173,7 +3234,7 @@ function MatchCard({
                   if (matchQueue?.queue2016?.length) {
                     seed = matchQueue.queue2016
                       .filter((q) => q.selectable)
-                      .slice(0, assist2016Target)
+                      .slice(0, limited2016Target)
                       .map((q) => q.id);
                   } else {
                     const avail = players2016
@@ -3183,7 +3244,7 @@ function MatchCard({
                     const rest = avail
                       .filter((id) => !canon.includes(id))
                       .sort((a, b) => playerName(a).localeCompare(playerName(b), "sv"));
-                    seed = [...canon, ...rest].slice(0, assist2016Target);
+                    seed = [...canon, ...rest].slice(0, limited2016Target);
                   }
                   setManual2016Ids(seed.length ? seed : []);
                 } else {
@@ -3192,7 +3253,7 @@ function MatchCard({
               }}
             />
             <span style={{ fontSize: 15 }}>
-              Manuellt urval 2016 ({assist2016Target} spelare)
+              Manuellt urval 2016 ({limited2016Target} spelare)
             </span>
           </label>
           {showManual2016 && (
@@ -3211,7 +3272,7 @@ function MatchCard({
                     checked={manual2016Ids.includes(p.id)}
                     disabled={
                       !isPlayerSelectableForMatch(p, m) ||
-                      (!manual2016Ids.includes(p.id) && manual2016Ids.length >= assist2016Target)
+                      (!manual2016Ids.includes(p.id) && manual2016Ids.length >= limited2016Target)
                     }
                     onChange={() => {
                       if (!isPlayerSelectableForMatch(p, m)) return;
@@ -3232,9 +3293,9 @@ function MatchCard({
         </div>
       )}
 
-      {matchSubTab === "squad" && m.status !== "played" && squadMode === "p11Mixed" && showManual2016 && !p11Manual2016Ok ? (
+      {matchSubTab === "squad" && m.status !== "played" && showManual2016 && !manual2016Ok ? (
         <p className="text-muted" style={{ margin: "0 0 10px", fontSize: 14 }}>
-          Välj exakt <strong>{assist2016Target}</strong> spelare födda 2016 under manuellt urval, eller avmarkera
+          Välj exakt <strong>{limited2016Target}</strong> spelare födda 2016 under manuellt urval, eller avmarkera
           kryssrutan ovan.
         </p>
       ) : null}
@@ -3246,7 +3307,7 @@ function MatchCard({
           disabled={
             m.status === "played" ||
             groupsValid === false ||
-            (squadMode === "p11Mixed" && showManual2016 && !p11Manual2016Ok)
+            (showManual2016 && !manual2016Ok)
           }
           onClick={async () => {
             setErr("");
@@ -3255,7 +3316,7 @@ function MatchCard({
               if (squadMode === "mixed" && showManual && manualIds.length) {
                 body.override2015PlayerIds = manualIds;
               }
-              if (squadMode === "p11Mixed" && showManual2016 && manual2016Ids.length) {
+              if (showManual2016 && manual2016Ids.length) {
                 body.override2016PlayerIds = manual2016Ids;
               }
               const next = await api(`/api/matches/${m.id}/select`, {
@@ -3263,7 +3324,7 @@ function MatchCard({
                 body: Object.keys(body).length ? body : undefined,
               });
               await load({ prefetched: next });
-              setOkMsg("Lag valt.");
+              if (typeof onCopied === "function") onCopied("Lag valt.");
             } catch (x) {
               setErr(x.message);
             }
@@ -3452,6 +3513,7 @@ function ManualMatchModal({ open, busy, onCancel, onSubmit, setErr }) {
     home: "",
     away: "",
     p11Assist2016: 3,
+    p10Count2016: "",
   };
   const [draft, setDraft] = useState(emptyDraft);
 
@@ -3482,7 +3544,11 @@ function ManualMatchModal({ open, busy, onCancel, onSubmit, setErr }) {
       return;
     }
     try {
-      await onSubmit({ ...draft, p11Assist2016: isP11 ? draft.p11Assist2016 : 0 });
+      await onSubmit({
+        ...draft,
+        p11Assist2016: isP11 ? draft.p11Assist2016 : 0,
+        p10Count2016: isP11 ? "" : draft.p10Count2016,
+      });
     } catch {
       // onSubmit visar redan felmeddelandet via setErr.
     }
@@ -3593,7 +3659,25 @@ function ManualMatchModal({ open, busy, onCancel, onSubmit, setErr }) {
                   onChange={(e) => setField("p11Assist2016", e.target.value)}
                 />
               </label>
-            ) : null}
+            ) : (
+              <label className="field">
+                <span className="field__label">Antal födda 2016</span>
+                <input
+                  type="number"
+                  inputMode="numeric"
+                  pattern="[0-9]*"
+                  min={0}
+                  max={20}
+                  className="field__input"
+                  value={draft.p10Count2016}
+                  onChange={(e) => setField("p10Count2016", e.target.value)}
+                  placeholder="Alla"
+                />
+                <span className="field__hint" style={{ fontSize: 12, color: "var(--text-secondary)", marginTop: 4 }}>
+                  Lämna tomt för alla tillgängliga.
+                </span>
+              </label>
+            )}
           </div>
           <div className="modal-sheet__actions">
             <button type="button" className="btn btn--secondary" onClick={onCancel} disabled={busy}>
@@ -4295,6 +4379,12 @@ export default function App() {
       if (branch === "p11") {
         const n = Math.floor(Number(draft.p11Assist2016));
         fixture.p11Assist2016 = Number.isFinite(n) ? Math.max(0, Math.min(20, n)) : 3;
+      } else {
+        const raw = String(draft.p10Count2016 ?? "").trim();
+        if (raw !== "") {
+          const n = Math.floor(Number(raw));
+          if (Number.isFinite(n)) fixture.p10Count2016 = Math.max(0, Math.min(20, n));
+        }
       }
       const next = await api("/api/matches", {
         method: "POST",

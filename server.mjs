@@ -202,6 +202,7 @@ function syncFixturesFromIcs(state, fixtures) {
       const f = src[i];
       if (!m.fixture || typeof m.fixture !== "object") m.fixture = {};
       const prevAssist = m.fixture.p11Assist2016;
+      const prevP10Count = m.fixture.p10Count2016;
       m.fixture = {
         ...m.fixture,
         date: f.date,
@@ -212,6 +213,9 @@ function syncFixturesFromIcs(state, fixtures) {
       };
       if (branch === "p11" && prevAssist !== undefined) {
         m.fixture.p11Assist2016 = prevAssist;
+      }
+      if (branch === "p10" && prevP10Count !== undefined) {
+        m.fixture.p10Count2016 = prevP10Count;
       }
       touched.push(m.id);
     }
@@ -1443,6 +1447,9 @@ app.post("/api/matches", async (req, res) => {
     if (branch === "p11") {
       const n = Math.floor(Number(f.p11Assist2016));
       fixture.p11Assist2016 = Number.isFinite(n) ? Math.max(0, Math.min(20, n)) : 3;
+    } else if (f.p10Count2016 !== undefined && f.p10Count2016 !== null && f.p10Count2016 !== "") {
+      const n = Math.floor(Number(f.p10Count2016));
+      if (Number.isFinite(n)) fixture.p10Count2016 = Math.max(0, Math.min(20, n));
     }
 
     state.matches.push({
@@ -1512,12 +1519,23 @@ app.put("/api/matches/:id/fixture", async (req, res) => {
     "homeLogo",
     "awayLogo",
     "p11Assist2016",
+    "p10Count2016",
   ];
   for (const key of allowed) {
     if (body[key] === undefined) continue;
     if (key === "p11Assist2016") {
       const n = Math.floor(Number(body.p11Assist2016));
       match.fixture.p11Assist2016 = Number.isFinite(n) ? Math.max(0, Math.min(20, n)) : 0;
+    } else if (key === "p10Count2016") {
+      if (body.p10Count2016 === null || body.p10Count2016 === "") {
+        delete match.fixture.p10Count2016;
+      } else {
+        const n = Math.floor(Number(body.p10Count2016));
+        if (!Number.isFinite(n) || n < 0) {
+          return res.status(400).json({ error: "Ogiltigt antal födda 2016." });
+        }
+        match.fixture.p10Count2016 = Math.max(0, Math.min(20, n));
+      }
     } else if (key === "date") {
       const d = String(body.date).trim();
       if (!/^\d{4}-\d{2}-\d{2}$/.test(d)) {
