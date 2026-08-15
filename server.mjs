@@ -24,6 +24,7 @@ import {
   isPlayerAvailable,
   matchUnavailablePlayerIdSet,
   matchSquadMode,
+  matchBranchKey,
   p11Assist2016Count,
   stripLegacyP10SquadsIfNeeded,
   repairP11Squad2014IfNeeded,
@@ -99,6 +100,36 @@ function parseIcsDateTime(rawValue) {
     const d = value.slice(6, 8);
     return { date: `${y}-${m}-${d}`, time: "00:00", sortTs: Number(`${y}${m}${d}0000`) };
   }
+  // UTC (…Z): konvertera till Europe/Stockholm så tid stämmer med lokal matchtid.
+  if (/^\d{8}T\d{6}Z$/.test(value)) {
+    const y = value.slice(0, 4);
+    const mo = value.slice(4, 6);
+    const d = value.slice(6, 8);
+    const hh = value.slice(9, 11);
+    const mm = value.slice(11, 13);
+    const ss = value.slice(13, 15);
+    const utc = new Date(`${y}-${mo}-${d}T${hh}:${mm}:${ss}Z`);
+    if (Number.isNaN(utc.getTime())) return null;
+    const parts = new Intl.DateTimeFormat("en-GB", {
+      timeZone: "Europe/Stockholm",
+      year: "numeric",
+      month: "2-digit",
+      day: "2-digit",
+      hour: "2-digit",
+      minute: "2-digit",
+      hour12: false,
+    }).formatToParts(utc);
+    const get = (type) => parts.find((p) => p.type === type)?.value || "";
+    const date = `${get("year")}-${get("month")}-${get("day")}`;
+    let hour = get("hour");
+    if (hour === "24") hour = "00";
+    const time = `${hour}:${get("minute")}`;
+    return {
+      date,
+      time,
+      sortTs: Number(`${date.replace(/-/g, "")}${time.replace(":", "")}`),
+    };
+  }
   const compact = value.endsWith("Z") ? value.slice(0, -1) : value;
   if (!/^\d{8}T\d{6}$/.test(compact)) return null;
   const y = compact.slice(0, 4);
@@ -120,6 +151,10 @@ function inferBranchFromText(text) {
   return null;
 }
 
+function isOlmeTeamName(name) {
+  return /ifk\s*ölme|ifk\s*olme/i.test(String(name || ""));
+}
+
 function parseTeamsFromSummary(summary) {
   const cleaned = decodeIcsText(summary)
     .replace(/\b(p[\s-]?10|p[\s-]?11)\b/gi, "")
@@ -132,6 +167,32 @@ function parseTeamsFromSummary(summary) {
     if (a && b) return { home: a, away: b };
   }
   return { home: "", away: "" };
+}
+
+/** Jämför lagnamn mjukt (ignorera vit/syd m.m.). Högre = bättre träff. */
+function teamNameMatchScore(a, b) {
+  const strip = (s) =>
+    normalizeTeamKey(s)
+      .replace(/-(vit|syd|bla|blaa|gron|groen|svart|rod|roed)(-|$)/g, "$2")
+      .replace(/-+$/g, "");
+  const na = strip(a);
+  const nb = strip(b);
+  if (!na || !nb) return 0;
+  if (na === nb) return 100;
+  if (na.includes(nb) || nb.includes(na)) return 80;
+  const ta = new Set(na.split("-").filter((t) => t.length > 2));
+  const tb = new Set(nb.split("-").filter((t) => t.length > 2));
+  if (!ta.size || !tb.size) return 0;
+  let overlap = 0;
+  for (const t of ta) if (tb.has(t)) overlap += 1;
+  const ratio = overlap / Math.max(ta.size, tb.size);
+  return ratio >= 0.5 ? Math.round(50 + ratio * 40) : 0;
+}
+
+function fixtureOpponentName(home, away) {
+  if (isOlmeTeamName(home)) return away || "";
+  if (isOlmeTeamName(away)) return home || "";
+  return "";
 }
 
 function parseIcsFixtures(icsText) {
@@ -166,9 +227,10 @@ function parseIcsFixtures(icsText) {
     const dt = parseIcsDateTime(ev.dtstart);
     if (!dt) continue;
     const hintText = [ev.summary, ev.description, ev.categories].filter(Boolean).join(" ");
-    const branch = inferBranchFromText(hintText);
-    if (!branch) continue;
+    const branch = inferBranchFromText(hintText); // kan vara null — MinFotboll utelämnar ofta P10/P11
     const teams = parseTeamsFromSummary(ev.summary || "");
+    // Kalendern kan innehålla andra följda lag — behåll bara IFK Ölme-matcher.
+    if (!isOlmeTeamName(teams.home) && !isOlmeTeamName(teams.away)) continue;
     parsed.push({
       branch,
       date: dt.date,
@@ -177,53 +239,108 @@ function parseIcsFixtures(icsText) {
       home: teams.home,
       away: teams.away,
       summary: ev.summary || "",
+      opponent: fixtureOpponentName(teams.home, teams.away),
       sortTs: dt.sortTs,
     });
   }
   return parsed.sort((a, b) => a.sortTs - b.sortTs);
 }
 
+/**
+ * Synka ICS → befintliga matcher.
+ * Parar på motståndare + datum (inte längre A/B-index per gren), eftersom
+ * MinFotboll-ICS ofta saknar P10/P11-etikett och blandar åldersgrupper.
+ * Manuella matcher och redan genomförda matcher lämnas orörda.
+ */
 function syncFixturesFromIcs(state, fixtures) {
-  const byBranch = {
-    p10: fixtures.filter((f) => f.branch === "p10"),
-    p11: fixtures.filter((f) => f.branch === "p11"),
-  };
+  const targets = (state.matches || [])
+    .filter((m) => !m.manualSource && m.status !== "played")
+    .slice();
+  const usedTargetIds = new Set();
   const touched = [];
-  for (const branch of ["p10", "p11"]) {
-    // Manuelt skapade matcher (manualSource) parar vi aldrig med ICS — användaren
-    // har lagt in dem själv och ska aldrig få sin date/venue/teams överskrivna.
-    const targetMatches = (state.matches || [])
-      .filter((m) => (m.branch || "p10") === branch && !m.manualSource)
-      .sort(compareMatchesChronologically);
-    const src = byBranch[branch];
-    const n = Math.min(targetMatches.length, src.length);
-    for (let i = 0; i < n; i++) {
-      const m = targetMatches[i];
-      const f = src[i];
-      if (!m.fixture || typeof m.fixture !== "object") m.fixture = {};
-      const prevAssist = m.fixture.p11Assist2016;
-      const prevP10Count = m.fixture.p10Count2016;
-      m.fixture = {
-        ...m.fixture,
-        date: f.date,
-        time: f.time || "00:00",
-        venue: f.venue || m.fixture.venue || "",
-        home: f.home || m.fixture.home || "",
-        away: f.away || m.fixture.away || "",
-      };
-      if (branch === "p11" && prevAssist !== undefined) {
-        m.fixture.p11Assist2016 = prevAssist;
-      }
-      if (branch === "p10" && prevP10Count !== undefined) {
-        m.fixture.p10Count2016 = prevP10Count;
-      }
-      touched.push(m.id);
+  let matched = 0;
+  let unmatchedIcs = 0;
+
+  for (const f of fixtures) {
+    const opp = f.opponent || fixtureOpponentName(f.home, f.away);
+    if (!opp) {
+      unmatchedIcs += 1;
+      continue;
     }
+    let best = null;
+    let bestScore = 0;
+    for (const m of targets) {
+      if (usedTargetIds.has(m.id)) continue;
+      if (f.branch && matchBranchKey(m) !== f.branch) continue;
+      const mHome = m.fixture?.home || "";
+      const mAway = m.fixture?.away || "";
+      const mOpp = fixtureOpponentName(mHome, mAway) || (!isOlmeTeamName(mHome) ? mHome : mAway);
+      const nameScore = teamNameMatchScore(opp, mOpp);
+      if (nameScore < 70) continue;
+      const mDate = String(m.fixture?.date || "");
+      let dateScore = 0;
+      if (mDate && mDate === f.date) dateScore = 50;
+      else if (mDate && f.date) {
+        const md = Date.parse(`${mDate}T12:00:00`);
+        const fd = Date.parse(`${f.date}T12:00:00`);
+        if (Number.isFinite(md) && Number.isFinite(fd)) {
+          const days = Math.abs(md - fd) / 86400000;
+          if (days <= 1) dateScore = 35;
+          else if (days <= 3) dateScore = 15;
+          else continue; // för långt ifrån — hoppa
+        }
+      } else {
+        dateScore = 5; // saknar datum på matchen
+      }
+      const score = nameScore + dateScore;
+      if (score > bestScore) {
+        bestScore = score;
+        best = m;
+      }
+    }
+    if (!best || bestScore < 105) {
+      unmatchedIcs += 1;
+      continue;
+    }
+
+    usedTargetIds.add(best.id);
+    if (!best.fixture || typeof best.fixture !== "object") best.fixture = {};
+    const prevAssist = best.fixture.p11Assist2016;
+    const prevP10Count = best.fixture.p10Count2016;
+    const prevSeries = best.fixture.series;
+    const prevAssociation = best.fixture.association;
+    best.fixture = {
+      ...best.fixture,
+      date: f.date,
+      time: f.time || best.fixture.time || "00:00",
+      venue: f.venue || best.fixture.venue || "",
+      home: f.home || best.fixture.home || "",
+      away: f.away || best.fixture.away || "",
+      series: prevSeries || best.fixture.series || "",
+      association: prevAssociation || best.fixture.association || "",
+    };
+    if (matchBranchKey(best) === "p11" && prevAssist !== undefined) {
+      best.fixture.p11Assist2016 = prevAssist;
+    }
+    if (matchBranchKey(best) === "p10" && prevP10Count !== undefined) {
+      best.fixture.p10Count2016 = prevP10Count;
+    }
+    touched.push(best.id);
+    matched += 1;
   }
+
   state.matches.sort(compareMatchesChronologically);
+  const withBranch = {
+    p10: fixtures.filter((f) => f.branch === "p10").length,
+    p11: fixtures.filter((f) => f.branch === "p11").length,
+    unknown: fixtures.filter((f) => !f.branch).length,
+  };
   return {
     updatedMatches: touched.length,
-    sourceCounts: { p10: byBranch.p10.length, p11: byBranch.p11.length },
+    matched,
+    unmatchedIcs,
+    sourceCounts: withBranch,
+    olmeEvents: fixtures.length,
   };
 }
 
@@ -1215,7 +1332,10 @@ app.post("/api/fixtures/sync-ics", async (req, res) => {
     const icsText = await response.text();
     const fixtures = parseIcsFixtures(icsText);
     if (!fixtures.length) {
-      return res.status(400).json({ error: "Inga matcher hittades i ICS-flödet." });
+      return res.status(400).json({
+        error:
+          "Inga IFK Ölme-matcher hittades i ICS-flödet. Kontrollera att kalenderlänken tillhör rätt MinFotboll-konto.",
+      });
     }
     const result = syncFixturesFromIcs(state, fixtures);
     await writeState(state);
@@ -1225,6 +1345,7 @@ app.post("/api/fixtures/sync-ics", async (req, res) => {
         url,
         parsedEvents: fixtures.length,
         updatedMatches: result.updatedMatches,
+        unmatchedIcs: result.unmatchedIcs,
         sourceCounts: result.sourceCounts,
       },
     });

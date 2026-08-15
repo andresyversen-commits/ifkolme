@@ -4505,7 +4505,12 @@ export default function App() {
       setState(next);
       const updated = Number(next?.sync?.updatedMatches || 0);
       const parsed = Number(next?.sync?.parsedEvents || 0);
-      setOkMsg(`MinFotboll synkad: ${updated} matcher uppdaterade (${parsed} händelser lästa).`);
+      const unmatched = Number(next?.sync?.unmatchedIcs || 0);
+      setOkMsg(
+        unmatched > 0
+          ? `MinFotboll synkad: ${updated} matcher uppdaterade (${parsed} Ölme-händelser, ${unmatched} utan matchning i appen).`
+          : `MinFotboll synkad: ${updated} matcher uppdaterade (${parsed} Ölme-händelser).`,
+      );
       if (next?.matches?.length) {
         const activeExists = next.matches.some((m) => m.id === activeMatchId);
         if (!activeExists) setActiveMatchId(next.matches[0].id);
