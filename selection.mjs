@@ -488,6 +488,18 @@ export function repairGroups2016IfNeeded(state) {
   return true;
 }
 
+/** Kalenderdatum för match (YYYY-MM-DD). */
+export function matchFixtureDate(m) {
+  return String(m?.fixture?.date || "").trim();
+}
+
+/** Sant om två matcher spelas samma dag (oberoende av tid/lag). */
+export function isSameMatchDay(a, b) {
+  const da = matchFixtureDate(a);
+  const db = matchFixtureDate(b);
+  return Boolean(da && db && da === db);
+}
+
 /** Sortering efter datum/tid (flera serier / P10+P11 i samma state). */
 export function matchChronologicalKey(m) {
   const d = m.fixture?.date || "0000-01-01";
@@ -517,18 +529,25 @@ export function computeNextGroup2015(state) {
   return GROUP_ORDER[(i + 1) % 3];
 }
 
-export function getLastPlayedSelectionIds(matches) {
-  const last = lastCompletedMatch({ matches });
+export function getLastPlayedSelectionIds(matches, asOfMatch = null) {
+  let played = (matches || [])
+    .filter((m) => m.status === "played")
+    .filter((m) => matchSquadMode(m) === "mixed");
+  if (asOfMatch) {
+    played = played.filter((m) => !isSameMatchDay(m, asOfMatch));
+  }
+  if (!played.length) return [];
+  const last = played.reduce((a, b) => (compareMatchesChronologically(a, b) > 0 ? a : b));
   return last?.selectedPlayerIds?.length ? [...last.selectedPlayerIds] : [];
 }
 
-export function getLastPlayed2015Ids(matches, players) {
-  const ids = getLastPlayedSelectionIds(matches);
+export function getLastPlayed2015Ids(matches, players, asOfMatch = null) {
+  const ids = getLastPlayedSelectionIds(matches, asOfMatch);
   return ids.filter((id) => players.find((p) => p.id === id && birthYearNum(p) === 2015));
 }
 
-export function getLastPlayed2016Ids(matches, players) {
-  const ids = getLastPlayedSelectionIds(matches);
+export function getLastPlayed2016Ids(matches, players, asOfMatch = null) {
+  const ids = getLastPlayedSelectionIds(matches, asOfMatch);
   return ids.filter((id) => players.find((p) => p.id === id && birthYearNum(p) === 2016));
 }
 
@@ -618,7 +637,7 @@ export function fill2015Lineup(state, seedIds, rng, match = null) {
   if (chosen.length > MAX_2015_ON_FIELD) throw new Error("max_2015_exceeded");
 
   let out = [...chosen];
-  const prev2015 = getLastPlayed2015Ids(state.matches, state.players);
+  const prev2015 = getLastPlayed2015Ids(state.matches, state.players, match);
   while (out.length < MAX_2015_ON_FIELD) {
     const pool = state.players.filter(
       (p) => birthYearNum(p) === 2015 && isPlayerSelectableForMatch(p, match) && !out.includes(p.id)
@@ -651,7 +670,7 @@ export function fill2016Lineup(state, seedIds, targetCount, rng, match = null) {
   if (chosen.length > targetCount) throw new Error("max_2016_exceeded");
 
   let out = [...chosen];
-  const prev2016 = getLastPlayed2016Ids(state.matches, state.players);
+  const prev2016 = getLastPlayed2016Ids(state.matches, state.players, match);
   while (out.length < targetCount) {
     const pool = state.players.filter(
       (p) => birthYearNum(p) === 2016 && isPlayerSelectableForMatch(p, match) && !out.includes(p.id),
@@ -1157,7 +1176,29 @@ export function validateSeasonDistribution(players, matchCount = 13, matches = n
  * frånvarande/avbockad.
  *
  * Används som "rättvis kö": färst matcher = först i tur.
+ *
+ * Matcher på samma kalenderdag som `asOfMatch` räknas inte — P10 och P11 samma
+ * dag ska ha oberoende trupp/kö.
  */
+function adjustCountsForSameDayPlayed(state, counts, asOfMatch, year, modes) {
+  if (!asOfMatch) return;
+  const modeSet = new Set(modes || ["mixed"]);
+  for (const m of state.matches || []) {
+    if (m.status !== "played") continue;
+    if (String(m.id) === String(asOfMatch.id)) continue;
+    if (!isSameMatchDay(m, asOfMatch)) continue;
+    if (!modeSet.has(matchSquadMode(m))) continue;
+    for (const id of m.selectedPlayerIds || []) {
+      const pid = String(id ?? "").trim();
+      if (!pid) continue;
+      if (playerMatchParticipationKind(m, pid, state) !== "played") continue;
+      const pl = state.players.find((x) => String(x.id) === pid);
+      if (!pl || birthYearNum(pl) !== year) continue;
+      counts.set(pid, Math.max(0, (counts.get(pid) || 0) - 1));
+    }
+  }
+}
+
 export function projectedMatchCounts(state, asOfMatch, year, modes) {
   const counts = new Map();
   const modeSet = new Set(modes || ["mixed"]);
@@ -1165,11 +1206,13 @@ export function projectedMatchCounts(state, asOfMatch, year, modes) {
     if (birthYearNum(p) !== year) continue;
     counts.set(String(p.id), Number(p.matchesPlayed || 0));
   }
+  adjustCountsForSameDayPlayed(state, counts, asOfMatch, year, modes);
   const ordered = (state.matches || [])
     .filter((m) => modeSet.has(matchSquadMode(m)))
     .sort(compareMatchesChronologically);
   for (const m of ordered) {
     if (asOfMatch && String(m.id) === String(asOfMatch.id)) break;
+    if (asOfMatch && isSameMatchDay(m, asOfMatch)) continue;
     if (m.status === "played") continue; // redan inräknad via matchesPlayed
     const slots = Array.isArray(m.selectedPlayerIds) ? m.selectedPlayerIds : [];
     for (const id of slots) {
@@ -1189,6 +1232,8 @@ export function projectedMatchCounts(state, asOfMatch, year, modes) {
  * begrenset til matcher før `asOfMatch`. Lavere indeks = spilte for lengre tid
  * siden (eller har aldri spilt → -1). Brukes som tiebreaker for å rotere
  * mellom spillere med samme antall matcher.
+ *
+ * Matcher på samme dag som `asOfMatch` hoppes over.
  */
 function lastSelectionIndexes(state, asOfMatch, year, modes) {
   const idx = new Map();
@@ -1199,6 +1244,10 @@ function lastSelectionIndexes(state, asOfMatch, year, modes) {
   let i = 0;
   for (const m of ordered) {
     if (asOfMatch && String(m.id) === String(asOfMatch.id)) break;
+    if (asOfMatch && isSameMatchDay(m, asOfMatch)) {
+      i++;
+      continue;
+    }
     const slots = Array.isArray(m.selectedPlayerIds) ? m.selectedPlayerIds : [];
     for (const id of slots) {
       const pid = String(id ?? "").trim();
