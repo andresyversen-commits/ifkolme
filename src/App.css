@@ -1729,6 +1729,26 @@ a {
   padding: 3px 10px;
 }
 
+button.match-card__result-badge--edit,
+button.match-card__rating-compact--edit,
+button.match-card__report-pill {
+  cursor: pointer;
+  font: inherit;
+  font-size: inherit;
+  font-weight: inherit;
+  line-height: inherit;
+  appearance: none;
+  -webkit-appearance: none;
+}
+
+button.match-card__result-badge--edit:hover,
+button.match-card__result-badge--edit:focus-visible,
+button.match-card__rating-compact--edit:hover,
+button.match-card__rating-compact--edit:focus-visible {
+  border-color: color-mix(in oklab, var(--accent, #2563eb) 55%, var(--border));
+  outline: none;
+}
+
 .match-card__rating-compact {
   font-size: 13px;
   font-weight: 700;

@@ -2387,17 +2387,27 @@ function MatchCard({
             <span className="badge badge--muted">Kommande</span>
           )}
           {m.status === "played" && m.matchReport?.result ? (
-            <span className="match-card__result-badge" title="Resultat">
+            <button
+              type="button"
+              className="match-card__result-badge match-card__result-badge--edit"
+              title="Ändra resultat"
+              onClick={openReportDialog}
+            >
               {displayMatchResult(m.matchReport.result)}
-            </span>
+            </button>
           ) : m.status === "played" && m.matchReport?.opponentRating != null ? (
-            <span className="match-card__rating-compact" title="Motståndare">
+            <button
+              type="button"
+              className="match-card__rating-compact match-card__rating-compact--edit"
+              title="Ändra rapport"
+              onClick={openReportDialog}
+            >
               {m.matchReport.opponentRating}/5
-            </span>
+            </button>
           ) : m.status === "played" && m.matchReport && matchReportHasContentForCopy(m.matchReport) ? (
-            <span className="badge badge--muted" title="Matchrapport sparad">
+            <button type="button" className="badge badge--muted match-card__report-pill" title="Matchrapport" onClick={openReportDialog}>
               Rapport
-            </span>
+            </button>
           ) : null}
           {m.selectedPlayerIds?.length ? (
             <span className="match-card__lineup-progress" title="Sparad startuppställning">
@@ -2406,7 +2416,7 @@ function MatchCard({
           ) : null}
           {m.status === "played" && (
             <button type="button" className="btn btn--secondary btn--sm match-card__report-btn" onClick={openReportDialog}>
-              Rapport
+              {m.matchReport?.result ? "Ändra resultat" : "Rapport"}
             </button>
           )}
           {m.status === "played" && (
