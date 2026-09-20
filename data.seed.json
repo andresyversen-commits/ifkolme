@@ -287,28 +287,6 @@
       "comments": []
     },
     {
-      "id": "m7",
-      "number": 7,
-      "status": "not_played",
-      "selectedPlayerIds": [],
-      "intendedGroup2015": null,
-      "selectionExplanation": null,
-      "fixture": {
-        "series": "P 10 GRÖN 2026",
-        "association": "Värmlands Fotbollförbund",
-        "date": "2026-08-09",
-        "time": "00:00",
-        "venue": "Sannaheden",
-        "home": "IFK Kristinehamn Fotboll (vit)",
-        "away": "IFK Ölme"
-      },
-      "intendedGroup2016": null,
-      "branch": "p10",
-      "selectedPlayers": [],
-      "group2015": null,
-      "comments": []
-    },
-    {
       "id": "m8",
       "number": 8,
       "status": "not_played",
@@ -411,28 +389,6 @@
         "venue": "Mörmons IP",
         "home": "Hammarö FK",
         "away": "IFK Ölme"
-      },
-      "intendedGroup2016": null,
-      "branch": "p10",
-      "selectedPlayers": [],
-      "group2015": null,
-      "comments": []
-    },
-    {
-      "id": "m13",
-      "number": 13,
-      "status": "not_played",
-      "selectedPlayerIds": [],
-      "intendedGroup2015": null,
-      "selectionExplanation": null,
-      "fixture": {
-        "series": "P 10 GRÖN 2026",
-        "association": "Värmlands Fotbollförbund",
-        "date": "2026-09-20",
-        "time": "10:00",
-        "venue": "Ölme IP",
-        "home": "IFK Ölme",
-        "away": "Filipstads FF"
       },
       "intendedGroup2016": null,
       "branch": "p10",

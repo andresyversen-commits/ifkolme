@@ -687,10 +687,20 @@ function mergeSeedFixtureIntoMatch(existing, seedFixture) {
   return changed;
 }
 
+const CANCELLED_SEED_MATCH_IDS = new Set(["m7", "m13"]);
+
+function pruneCancelledSeedMatches(state) {
+  if (!Array.isArray(state.matches) || state.matches.length === 0) return false;
+  const next = state.matches.filter((m) => !CANCELLED_SEED_MATCH_IDS.has(m.id));
+  if (next.length === state.matches.length) return false;
+  state.matches = next;
+  return true;
+}
+
 function ensureMinimumScheduleFromSeed(state) {
   const seed = loadSeedState();
   if (!seed) return false;
-  let dirty = false;
+  let dirty = pruneCancelledSeedMatches(state);
   const byId = new Map((state.matches || []).map((m) => [m.id, m]));
   for (const sm of seed.matches || []) {
     const existing = byId.get(sm.id);
