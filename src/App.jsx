@@ -1061,13 +1061,176 @@ function buildFixtureSaveBody(draft, { includeP11Assist = false, includeP10Count
   return body;
 }
 
+function isOlmeTeamName(name) {
+  return /ifk\s*ölme|ifk\s*olme/i.test(String(name || ""));
+}
+
 function fixtureOpponentLabel(m) {
   const home = String(m.fixture?.home || m.fixture?.homeTeam || "").trim();
   const away = String(m.fixture?.away || m.fixture?.awayTeam || "").trim();
   if (!home && !away) return "Motståndare saknas";
-  if (/ifk\s*ölme/i.test(home) || /ifk\s*olme/i.test(home)) return away || home;
-  if (/ifk\s*ölme/i.test(away) || /ifk\s*olme/i.test(away)) return home || away;
+  if (isOlmeTeamName(home)) return away || home;
+  if (isOlmeTeamName(away)) return home || away;
   return away || home;
+}
+
+function parseRegisteredScore(raw) {
+  const s = String(raw || "").trim().replace(/–/g, "-");
+  const m = s.match(/^(\d+)\s*-\s*(\d+)$/);
+  if (!m) return null;
+  const home = Number(m[1]);
+  const away = Number(m[2]);
+  if (!Number.isFinite(home) || !Number.isFinite(away)) return null;
+  return { home, away };
+}
+
+/** Hemmalagets mål först i rapporten. Returnerar Ölmes gjorda/insläppta. */
+function olmeScoreFromMatch(m) {
+  const parsed = parseRegisteredScore(m?.matchReport?.result);
+  if (!parsed) return null;
+  const home = String(m.fixture?.home || m.fixture?.homeTeam || "").trim();
+  const away = String(m.fixture?.away || m.fixture?.awayTeam || "").trim();
+  const homeOlme = isOlmeTeamName(home);
+  const awayOlme = isOlmeTeamName(away);
+  if (homeOlme === awayOlme) return null;
+  const gf = homeOlme ? parsed.home : parsed.away;
+  const ga = homeOlme ? parsed.away : parsed.home;
+  return {
+    gf,
+    ga,
+    venue: homeOlme ? "H" : "B",
+    outcome: gf > ga ? "W" : gf === ga ? "D" : "L",
+  };
+}
+
+function emptySeasonRecord() {
+  return {
+    played: 0,
+    withResult: 0,
+    missingResult: 0,
+    wins: 0,
+    draws: 0,
+    losses: 0,
+    gf: 0,
+    ga: 0,
+    gd: 0,
+    home: { wins: 0, draws: 0, losses: 0 },
+    away: { wins: 0, draws: 0, losses: 0 },
+  };
+}
+
+function summarizeSeasonRecord(matches) {
+  const rec = emptySeasonRecord();
+  for (const m of matches || []) {
+    if (m?.status !== "played") continue;
+    rec.played += 1;
+    const score = olmeScoreFromMatch(m);
+    if (!score) {
+      rec.missingResult += 1;
+      continue;
+    }
+    rec.withResult += 1;
+    rec.gf += score.gf;
+    rec.ga += score.ga;
+    if (score.outcome === "W") rec.wins += 1;
+    else if (score.outcome === "D") rec.draws += 1;
+    else rec.losses += 1;
+    const side = score.venue === "H" ? rec.home : rec.away;
+    if (score.outcome === "W") side.wins += 1;
+    else if (score.outcome === "D") side.draws += 1;
+    else side.losses += 1;
+  }
+  rec.gd = rec.gf - rec.ga;
+  return rec;
+}
+
+function formatRecordTriplet(w, d, l) {
+  return `${w}–${d}–${l}`;
+}
+
+function formatGoalDiff(n) {
+  if (!Number.isFinite(n)) return "—";
+  if (n > 0) return `+${n}`;
+  return String(n);
+}
+
+function SeasonRecordSection({ record, compare, teamLabel }) {
+  if (!record || record.played === 0) {
+    return (
+      <div className="season-record">
+        <h3 className="season-record__title">Säsongens resultat</h3>
+        <p className="empty-hint">Inga genomförda matcher i valet än.</p>
+      </div>
+    );
+  }
+
+  const tiles = [
+    { key: "w", value: record.wins, label: "Segrar", tone: "success" },
+    { key: "d", value: record.draws, label: "Oavgjorda", tone: "neutral" },
+    { key: "l", value: record.losses, label: "Förluster", tone: "danger" },
+    { key: "gf", value: record.gf, label: "Gjorda mål", tone: "neutral" },
+    { key: "ga", value: record.ga, label: "Insläppta", tone: "neutral" },
+    { key: "gd", value: formatGoalDiff(record.gd), label: "Målskillnad", tone: record.gd > 0 ? "success" : record.gd < 0 ? "danger" : "neutral" },
+  ];
+
+  return (
+    <div className="season-record">
+      <h3 className="season-record__title">Säsongens resultat</h3>
+      <p className="season-record__lead">
+        {teamLabel}. Registrerat resultat är hemmalagets mål först — 2–3 borta är seger för Ölme.
+      </p>
+      <div className="season-record__grid" role="list">
+        {tiles.map((t) => (
+          <div key={t.key} className={`season-record__tile season-record__tile--${t.tone}`} role="listitem">
+            <span className="season-record__value">{t.value}</span>
+            <span className="season-record__label">{t.label}</span>
+          </div>
+        ))}
+      </div>
+      <p className="season-record__split">
+        Hemma {formatRecordTriplet(record.home.wins, record.home.draws, record.home.losses)}
+        {" · "}
+        Borta {formatRecordTriplet(record.away.wins, record.away.draws, record.away.losses)}
+      </p>
+      {compare ? (
+        <div className="season-record__compare-wrap">
+          <table className="season-record__compare">
+            <caption className="visually-hidden">Jämförelse P 10 och P 11</caption>
+            <thead>
+              <tr>
+                <th scope="col">Lag</th>
+                <th scope="col">S–O–F</th>
+                <th scope="col">Gjorda</th>
+                <th scope="col">Insläppta</th>
+                <th scope="col">Diff</th>
+              </tr>
+            </thead>
+            <tbody>
+              {[
+                { id: "p10", name: "P 10", rec: compare.p10 },
+                { id: "p11", name: "P 11", rec: compare.p11 },
+                { id: "all", name: "Totalt", rec: record },
+              ].map((row) => (
+                <tr key={row.id}>
+                  <th scope="row">{row.name}</th>
+                  <td>{formatRecordTriplet(row.rec.wins, row.rec.draws, row.rec.losses)}</td>
+                  <td>{row.rec.gf}</td>
+                  <td>{row.rec.ga}</td>
+                  <td>{formatGoalDiff(row.rec.gd)}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      ) : null}
+      {record.missingResult > 0 ? (
+        <p className="text-muted season-record__note">
+          {record.missingResult} genomförd{record.missingResult === 1 ? " match" : "a matcher"} saknar läsbart
+          resultat och räknas inte i segrar/mål.
+        </p>
+      ) : null}
+    </div>
+  );
 }
 
 function participationKindLabelSv(kind) {
@@ -4030,6 +4193,9 @@ export default function App() {
         matchesPlayed: 0,
         byPlayer: new Map(),
         declines: new Map(),
+        season: emptySeasonRecord(),
+        seasonP10: emptySeasonRecord(),
+        seasonP11: emptySeasonRecord(),
       };
     }
     const scopedMatches = state.matches.filter((m) => {
@@ -4061,6 +4227,9 @@ export default function App() {
       matchesPlayed: playedScope.length,
       byPlayer,
       declines,
+      season: summarizeSeasonRecord(scopedMatches),
+      seasonP10: summarizeSeasonRecord((state.matches || []).filter((m) => (m.branch || "p10") !== "p11")),
+      seasonP11: summarizeSeasonRecord((state.matches || []).filter((m) => m.branch === "p11")),
     };
   }, [state, overviewTeam]);
 
@@ -5634,6 +5803,22 @@ export default function App() {
               bara som deltagare i P 11, samma regler som i truppen).
             </p>
           </div>
+
+          <SeasonRecordSection
+            record={overviewScopeStats.season}
+            compare={
+              overviewTeam === "both"
+                ? { p10: overviewScopeStats.seasonP10, p11: overviewScopeStats.seasonP11 }
+                : null
+            }
+            teamLabel={
+              overviewTeam === "both"
+                ? "P 10 och P 11 tillsammans"
+                : overviewTeam === "p11"
+                  ? "P 11 Blå"
+                  : "P 10 Grön"
+            }
+          />
 
           <div className="filter-block">
             <span className="filter-block__label">Vilka spelare som visas</span>
